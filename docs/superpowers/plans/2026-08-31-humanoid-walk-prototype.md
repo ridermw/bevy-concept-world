@@ -10,6 +10,98 @@
 
 ---
 
+## Plan-exit review decisions
+
+**Review mode:** Scope reduction followed by a compressed review. The original
+draft touched more than eight files and introduced five runtime modules before
+proving that the real humanoid could render. Execution therefore prioritizes
+the visible vertical slice and adds hardening only after the humanoid runs.
+
+### What already exists
+
+| Existing flow | Reuse decision |
+|---|---|
+| Bevy `animated_mesh_control` example | Reuse its root-`Gltf`, named-animation, graph, transition, and pause/resume patterns |
+| Bevy `scene_viewer` example | Reuse it to inspect the downloaded Quaternius GLB before application code |
+| Bevy `screenshot` example | Reuse `Screenshot::primary_window()` and `save_to_disk` for acceptance evidence |
+| Quaternius `AnimationLibrary_Godot_Standard.glb` | Keep its model, rig, skin, and `Walk_Loop` clip together; do not retarget |
+
+### Review findings and resolutions
+
+1. **Architecture:** The draft hardens configuration before proving the real
+   asset. Execute the shortest visible path first within each task: import,
+   inspect, render, animate, then add manifest and failure-path coverage.
+2. **Code quality:** Do not extract additional services or generic asset
+   frameworks. The five focused modules in the file map are the maximum; merge
+   responsibilities rather than adding another abstraction.
+3. **Tests:** Pure fabricated metadata cannot prove that the real GLB loads.
+   The release-mode application smoke run and captured screenshot are blocking,
+   and failure-path tests must use the checked-in asset contract.
+4. **Performance:** One humanoid needs no optimization project. Hashing the
+   roughly 15 MB model once at startup is acceptable; remove `--all-features`
+   from Clippy to avoid compiling unrelated Bevy feature combinations.
+
+### Test and failure diagram
+
+```text
+Official ZIP
+    |
+    +-- missing model/license ----------> importer fails clearly
+    |
+    v
+GLB + license + generated hash
+    |
+    +-- changed bytes ------------------> bootstrap enters Failed
+    |
+    v
+Bevy AssetServer
+    |
+    +-- load/dependency error ----------> Failed overlay + log
+    |
+    v
+named Scene + named Walk_Loop
+    |
+    +-- missing/renamed name -----------> Failed overlay + discovered names
+    |
+    v
+spawned hierarchy + AnimationPlayer
+    |
+    +-- unexpected player count --------> Failed overlay + actual count
+    |
+    v
+looping in-place animation
+    |
+    +-- wrong scale/facing/deformation -> fixed-camera visual gate fails
+    |
+    v
+humanoid-walk.png + validation record
+```
+
+There are no silent, unhandled branches in the intended flow. The visual gate
+is required because scale, facing, deformation, and loop quality cannot be
+proven by the metadata tests.
+
+### NOT in scope
+
+- Custom concept-art meshes: requires a separate Blender and skinning design.
+- Animation retargeting: unnecessary while using the supplied model and rig.
+- World locomotion and root motion: the first clip remains stationary.
+- Collision and controls: do not affect asset-pipeline proof.
+- Animation blending: one named clip is sufficient.
+- Multiple characters and optimization: measure only after one character works.
+
+### Completion summary
+
+- Step 0: Scope Challenge (selected: scope reduction)
+- Architecture Review: 1 issue found and resolved by vertical-slice ordering
+- Code Quality Review: 1 issue found and resolved with a hard abstraction cap
+- Test Review: diagram produced, 1 critical real-asset gap identified
+- Performance Review: 1 low-risk build-cost issue identified
+- NOT in scope: written
+- What already exists: written
+- Backlog updates: 0 items added; deferred work belongs in later specifications
+- Failure modes: 1 critical gap flagged for correction during execution
+
 ## File map
 
 | File | Responsibility |
@@ -1357,7 +1449,7 @@ Run each command:
 
 ```powershell
 cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets -- -D warnings
 cargo test
 cargo run --release
 ```
