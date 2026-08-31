@@ -329,6 +329,19 @@ git commit -m "build: scaffold pinned Bevy application" `
 
 ### Task 3: Import and lock the Quaternius humanoid
 
+> **Superseded — completed, then hardened.** Pack v3.0 ships the humanoid as
+> `Unreal-Godot/UAL1_Standard.glb`, not `AnimationLibrary_Godot_Standard.glb`, so
+> the file names below are historical. The draft script in Step 1 is superseded
+> by the shipped `tools/import_quaternius.ps1`, which additionally verifies the
+> archive SHA-256 before extraction, matches exactly one model and exactly one
+> archive-root license (failing on zero or several instead of taking the first),
+> stages and validates a complete destination directory before swapping it in
+> with rollback, writes UTF-8 without a BOM through `[System.IO.File]::WriteAllText`
+> so it also runs on Windows PowerShell 5.1, records `gltf_path` in
+> `asset.lock.ron`, and offers a read-only `-VerifyOnly` mode. Do not copy the
+> draft below; see
+> [`docs/validation/humanoid-import.md`](../../validation/humanoid-import.md).
+
 **Files:**
 - Create: `tools/import_quaternius.ps1`
 - Create: `assets/characters/quaternius/character.ron`
@@ -514,7 +527,7 @@ fn loads_a_valid_character_contract() {
     .unwrap();
     fs::write(
         asset_dir.join("asset.lock.ron"),
-        r#"(sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
+        r#"(gltf_path: "characters/quaternius/model.glb", sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
     )
     .unwrap();
 
@@ -533,7 +546,7 @@ fn rejects_a_changed_model() {
     fs::write(asset_dir.join("character.ron"), valid_manifest()).unwrap();
     fs::write(
         asset_dir.join("asset.lock.ron"),
-        r#"(sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
+        r#"(gltf_path: "characters/quaternius/model.glb", sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
     )
     .unwrap();
 
@@ -615,6 +628,7 @@ pub struct CharacterConfig {
 
 #[derive(Debug, Deserialize)]
 struct AssetLock {
+    gltf_path: String,
     sha256: String,
     byte_size: u64,
 }
@@ -637,6 +651,8 @@ pub enum ConfigError {
     InvalidPlayerCount,
     #[error("root motion must be disabled for this prototype")]
     RootMotionEnabled,
+    #[error("asset.lock.ron locks {locked}, but character.ron declares {declared}")]
+    LockPathMismatch { locked: String, declared: String },
     #[error("asset integrity mismatch: expected {expected_hash}/{expected_size}, got {actual_hash}/{actual_size}")]
     Integrity {
         expected_hash: String,
@@ -685,6 +701,13 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
     let config: CharacterConfig = parse_ron(&config_path)?;
     let lock: AssetLock = parse_ron(&lock_path)?;
     config.validate()?;
+
+    if lock.gltf_path != config.gltf_path {
+        return Err(ConfigError::LockPathMismatch {
+            locked: lock.gltf_path,
+            declared: config.gltf_path,
+        });
+    }
 
     let model_path = asset_root.join(&config.gltf_path);
     let bytes = read(&model_path)?;
@@ -1378,7 +1401,7 @@ fn rejects_missing_license_file() {
     fs::write(asset_dir.join("character.ron"), valid_manifest()).unwrap();
     fs::write(
         asset_dir.join("asset.lock.ron"),
-        r#"(sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
+        r#"(gltf_path: "characters/quaternius/model.glb", sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
     )
     .unwrap();
 
@@ -1432,7 +1455,7 @@ Expected: all contract tests pass.
 Run:
 
 ```powershell
-$asset = 'assets\characters\quaternius\AnimationLibrary_Godot_Standard.glb'
+$asset = 'assets\characters\quaternius\UAL1_Standard.glb'
 $backup = "$asset.bak"
 Copy-Item -LiteralPath $asset -Destination $backup
 Add-Content -LiteralPath $asset -Value 'integrity-test'

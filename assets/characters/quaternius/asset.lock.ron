@@ -1,4 +1,5 @@
 (
+    gltf_path: "characters/quaternius/UAL1_Standard.glb",
     sha256: "69591853d817488edaa8fd9bf8fc1d821eaeaf789f8627b3cd23b41c4ed67997",
     byte_size: 7618436,
 )

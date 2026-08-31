@@ -10,7 +10,7 @@ Design is complete for the first vertical slice:
       See [`docs/validation/engine-smoke-test.md`](docs/validation/engine-smoke-test.md).
 - [ ] Visual gate: Confirm animated Fox renders and clips switch in a GPU-accelerated desktop session. *(deferred — requires display)*
 - [x] Qualify a CC0 Quaternius humanoid and in-place walk animation: imported from the
-      official free pack and integrity-locked by SHA-256 and byte size.
+      official free pack and integrity-locked by asset path, SHA-256, and byte size.
       See [`docs/validation/humanoid-import.md`](docs/validation/humanoid-import.md).
 - [ ] Load and loop that walk in a standalone Bevy application.
 
@@ -25,8 +25,9 @@ clip whose root translation is zero for the whole clip. Its preserved CC0 licens
 
 Standalone humanoid animation is **not** complete: no Rust manifest, loader, validator,
 inspection scene, or animation code exists yet, so the walk has never been played. The
-recorded `yaw_degrees` of `180.0` is derived from the asset data and Bevy's coordinate
-conventions and still awaits on-screen visual confirmation. See
+recorded `yaw_degrees` of `180.0` is derived from the asset's bind-pose geometry (the toe
+and ball joints sit ahead of the ankle along `+Z`) and Bevy's `-Z` forward convention, and
+still awaits on-screen visual confirmation. See
 [`docs/superpowers/specs/2026-08-31-humanoid-walk-prototype-design.md`](docs/superpowers/specs/2026-08-31-humanoid-walk-prototype-design.md).
 
 ## Re-importing the humanoid asset
@@ -40,7 +41,22 @@ The humanoid is checked in, so this is only needed to refresh the pack. Download
   -ArchivePath "$env:USERPROFILE\Downloads\Universal Animation Library[Standard].zip"
 ```
 
-The script expands the archive only into the gitignored `.asset-import\quaternius`
-staging directory, copies the GLB and the archive's own license file into
-`assets\characters\quaternius`, and regenerates `asset.lock.ron`. It never edits
-`character.ron`; update that by hand if the pack's scene or clip names change.
+To re-check what is already imported without writing anything:
+
+```powershell
+.\tools\import_quaternius.ps1 -VerifyOnly
+```
+
+The script runs on Windows PowerShell 5.1 and PowerShell 7+. It verifies the
+archive's SHA-256 against the pinned v3.0 Standard hash before extracting,
+expands only into the gitignored `.asset-import` staging area, and requires
+exactly one archive member ending `Unreal-Godot\UAL1_Standard.glb` and exactly
+one license file at the archive root — zero or several of either is an error
+rather than a guess. It then stages a complete replacement for
+`assets\characters\quaternius`, validates it, and swaps it in atomically with
+rollback, so a refreshed model can never be paired with a stale
+`asset.lock.ron`. `character.ron` is preserved verbatim, never generated; update
+it by hand if the pack's scene or clip names change. Override
+`-ExpectedArchiveSha256` only for a deliberate pack upgrade, and record the new
+hash in the script and in
+[`docs/validation/humanoid-import.md`](docs/validation/humanoid-import.md).
