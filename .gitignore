@@ -1,1 +1,4 @@
 /.worktrees/
+/target/
+/.superpowers/
+/.asset-import/
