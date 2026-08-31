@@ -1,0 +1,15 @@
+(
+    id: "quaternius-universal-animation-library-v3-standard",
+    gltf_path: "characters/quaternius/UAL1_Standard.glb",
+    source_url: "https://quaternius.itch.io/universal-animation-library",
+    pack_version: "3.0",
+    downloaded_on: "2026-08-31",
+    license: "CC0-1.0",
+    license_path: "characters/quaternius/LICENSE.txt",
+    scene_name: "Scene",
+    animation_name: "Walk_Loop",
+    expected_animation_players: 1,
+    scale: 1.0,
+    yaw_degrees: 180.0,
+    root_motion: false,
+)
