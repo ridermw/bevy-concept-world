@@ -238,6 +238,44 @@ fn rejects_a_model_whose_size_changed_behind_the_same_prefix() {
     }
 }
 
+/// The lock holds the **actual** correct digest but an incorrect `byte_size`.
+/// A hash-only integrity check would miss this; only the size comparison
+/// catches it. Deleting `actual_size != lock.byte_size` from the loader
+/// would cause this test to panic.
+#[test]
+fn rejects_a_lock_with_correct_digest_but_wrong_byte_size() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    write_lock(
+        &root,
+        &fixture.gltf_path,
+        &model_sha256(),       // correct digest
+        MODEL_BYTES.len() + 1, // wrong size
+    );
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::Integrity {
+            expected_hash,
+            expected_size,
+            actual_hash,
+            actual_size,
+            ..
+        } => {
+            assert_eq!(
+                expected_hash.to_lowercase(),
+                actual_hash.to_lowercase(),
+                "hashes must match so only the size comparison rejects this fixture"
+            );
+            assert_ne!(expected_size, actual_size);
+            assert_eq!(expected_size, MODEL_BYTES.len() as u64 + 1);
+            assert_eq!(actual_size, MODEL_BYTES.len() as u64);
+        }
+        other => panic!("expected an integrity mismatch on size only, got {other}"),
+    }
+}
+
 #[test]
 fn accepts_an_uppercase_lock_digest() {
     let fixture = Fixture::default();

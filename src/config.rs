@@ -293,8 +293,8 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
     validate_digest(&lock_path, &lock.sha256)?;
 
     let license_path = asset_root.join(&config.license_path);
-    let license_bytes = read(&license_path)?;
     ensure_within_root("license_path", asset_root, &license_path)?;
+    let license_bytes = read(&license_path)?;
     if license_bytes.is_empty() {
         return Err(ConfigError::EmptyLicense { path: license_path });
     }
@@ -307,8 +307,8 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
     }
 
     let model_path = asset_root.join(&config.gltf_path);
-    let model_bytes = read(&model_path)?;
     ensure_within_root("gltf_path", asset_root, &model_path)?;
+    let model_bytes = read(&model_path)?;
     let actual_hash = format!("{:x}", Sha256::digest(&model_bytes));
     let actual_size = model_bytes.len() as u64;
     if !actual_hash.eq_ignore_ascii_case(&lock.sha256) || actual_size != lock.byte_size {
