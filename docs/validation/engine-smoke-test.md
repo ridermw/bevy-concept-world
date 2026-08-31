@@ -42,7 +42,7 @@ Result: `Finished \`dev\` profile [unoptimized + debuginfo] target(s) in 5m 52s`
 
 ```powershell
 cargo run --example animated_mesh_control
-# Process observed for 20 s then stopped with Stop-Process -Id <PID>
+# Observed for approximately 20 s, then terminated (press Ctrl+C to stop)
 ```
 
 ## Observed result
@@ -77,13 +77,19 @@ software renderer). The window object was created and the render loop started
 normally.
 
 **Visual clip switching is NOT verified here.** This smoke test only confirms
-that the engine initialises, loads the Fox asset, and enters the render loop
-without panicking. Observation of the animation clips and interactive keyboard
-controls remains for the final UI smoke gate, which requires a desktop session
-with a GPU-accelerated display.
+that the engine initialises and enters the render loop without panicking.
+Whether the Fox asset loaded or skinned-mesh animation began is not confirmed —
+no log lines in the captured output indicate asset load completion. Observation
+of the animation clips and interactive keyboard controls remains for the final
+UI smoke gate, which requires a desktop session with a GPU-accelerated display.
 
 ## Conclusion
 
-Phase 0 engine smoke test **PASSED** (no-panic startup confirmed). The Bevy
-0.19.1 toolchain is functional on this machine and the `animated_mesh_control`
-example builds and runs cleanly.
+Startup/build gate **PASSED** (no-panic startup confirmed). The Bevy 0.19.1
+toolchain is functional on this machine and the `animated_mesh_control` example
+builds and starts without panic. The window was created and the render loop
+started, though Vulkan errors and a software-renderer warning were emitted.
+
+Visual animation gate **DEFERRED** — observation of skinned-mesh animation clips
+and interactive controls requires a desktop session with a GPU-accelerated
+display and is not confirmed here.
