@@ -62,6 +62,12 @@ pub enum ConfigError {
         source: Box<ron::error::SpannedError>,
     },
 
+    #[error("{path} is not valid UTF-8: {source}")]
+    Utf8 {
+        path: PathBuf,
+        source: std::str::Utf8Error,
+    },
+
     #[error("character scale must be positive and finite, got {0}")]
     InvalidScale(f32),
 
@@ -85,6 +91,25 @@ pub enum ConfigError {
         "asset.lock.ron gltf_path '{locked}' does not match character.ron gltf_path '{declared}'"
     )]
     LockPathMismatch { locked: String, declared: String },
+
+    #[error(
+        "{path} declares sha256 '{value}', which is not exactly 64 ASCII hex characters \
+         (got {length} characters)"
+    )]
+    InvalidDigest {
+        path: PathBuf,
+        value: String,
+        length: usize,
+    },
+
+    #[error(
+        "field '{field}' resolves outside the asset root: {resolved} is not contained in {root}"
+    )]
+    EscapesAssetRoot {
+        field: &'static str,
+        root: PathBuf,
+        resolved: PathBuf,
+    },
 
     #[error("license file {path} exists but is empty")]
     EmptyLicense { path: PathBuf },
@@ -142,39 +167,46 @@ fn check_blank(field: &'static str, value: &str) -> Result<(), ConfigError> {
 /// Rejects blank, absolute, and traversing paths. Only a normalized relative
 /// path made of plain components is accepted, so a manifest can never point
 /// outside `asset_root`.
+///
+/// The checks are deliberately performed on the raw string rather than on
+/// `Path`, because `Path` is platform-specific: `std::path` on Unix reads
+/// `C:\Windows\evil.glb` as one ordinary file name, and `..\..` as one
+/// ordinary file name too. A manifest is authored once and loaded on every
+/// platform, so every absolute syntax and every separator must be rejected on
+/// every host. The `Path`-component pass is then kept as a belt-and-braces
+/// check for anything the host understands and the string scan did not.
 fn validate_relative_path(field: &'static str, raw: &str) -> Result<(), ConfigError> {
+    let invalid = |reason: &'static str| ConfigError::InvalidPath {
+        field,
+        path: raw.to_string(),
+        reason,
+    };
+
     if raw.trim().is_empty() {
-        return Err(ConfigError::InvalidPath {
-            field,
-            path: raw.to_string(),
-            reason: "must not be blank",
-        });
+        return Err(invalid("must not be blank"));
+    }
+    if raw.starts_with('/') || raw.starts_with('\\') {
+        return Err(invalid("must be a relative path, not rooted"));
+    }
+    if has_drive_prefix(raw) {
+        return Err(invalid(
+            "must be a relative path, not drive-qualified (e.g. 'C:...')",
+        ));
     }
 
-    let path = Path::new(raw);
-    if path.is_absolute() {
-        return Err(ConfigError::InvalidPath {
-            field,
-            path: raw.to_string(),
-            reason: "must be a relative path, not absolute",
-        });
+    for segment in raw.split(['/', '\\']) {
+        if segment == ".." {
+            return Err(invalid("must not contain '..' path traversal"));
+        }
     }
 
-    for component in path.components() {
+    for component in Path::new(raw).components() {
         match component {
             Component::ParentDir => {
-                return Err(ConfigError::InvalidPath {
-                    field,
-                    path: raw.to_string(),
-                    reason: "must not contain '..' path traversal",
-                });
+                return Err(invalid("must not contain '..' path traversal"));
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(ConfigError::InvalidPath {
-                    field,
-                    path: raw.to_string(),
-                    reason: "must be relative, not rooted or drive-qualified",
-                });
+                return Err(invalid("must be relative, not rooted or drive-qualified"));
             }
             Component::CurDir | Component::Normal(_) => {}
         }
@@ -183,14 +215,73 @@ fn validate_relative_path(field: &'static str, raw: &str) -> Result<(), ConfigEr
     Ok(())
 }
 
+/// True for a Windows drive-qualified path in either its absolute
+/// (`C:\dir`, `C:/dir`) or drive-relative (`C:dir`) form.
+fn has_drive_prefix(raw: &str) -> bool {
+    let mut chars = raw.chars();
+    matches!(
+        (chars.next(), chars.next()),
+        (Some(drive), Some(':')) if drive.is_ascii_alphabetic()
+    )
+}
+
+/// Confirms that `path`, after the operating system has resolved every
+/// symlink, junction, and `.` component, still lives inside `asset_root`.
+/// The relative-path check alone cannot see through a link, so this is what
+/// actually keeps a checked-in manifest from reading arbitrary files.
+///
+/// Both sides are canonicalized so the comparison is between two real paths
+/// (this also normalizes macOS's `/var` -> `/private/var` and Windows's
+/// verbatim `\\?\` prefix consistently).
+fn ensure_within_root(
+    field: &'static str,
+    asset_root: &Path,
+    path: &Path,
+) -> Result<(), ConfigError> {
+    let root = canonicalize(asset_root)?;
+    let resolved = canonicalize(path)?;
+
+    if resolved.starts_with(&root) {
+        Ok(())
+    } else {
+        Err(ConfigError::EscapesAssetRoot {
+            field,
+            root,
+            resolved,
+        })
+    }
+}
+
+fn canonicalize(path: &Path) -> Result<PathBuf, ConfigError> {
+    fs::canonicalize(path).map_err(|source| ConfigError::Read {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+/// A lock digest must be exactly 64 ASCII hex characters: anything else is a
+/// corrupt or hand-edited lock, not a mismatch to report as tampering.
+fn validate_digest(path: &Path, value: &str) -> Result<(), ConfigError> {
+    if value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(ConfigError::InvalidDigest {
+            path: path.to_owned(),
+            value: value.to_string(),
+            length: value.chars().count(),
+        })
+    }
+}
+
 /// Loads and fully validates the humanoid character contract rooted at
 /// `asset_root` (the Bevy asset directory, e.g. `assets/`).
 ///
 /// This reads `character.ron` and `asset.lock.ron` from their fixed relative
 /// locations, validates every semantic field, confirms the declared license
-/// file exists and is non-empty, confirms the lock's `gltf_path` matches the
-/// manifest's, and re-hashes the actual GLB to confirm its byte size and
-/// lowercase SHA-256 match the lock. No Bevy asset loading happens here.
+/// file exists, is non-empty, and canonically resolves inside `asset_root`,
+/// confirms the lock's `gltf_path` matches the manifest's and carries a
+/// well-formed digest, and re-hashes the actual GLB to confirm its byte size
+/// and SHA-256 match the lock. No Bevy asset loading happens here.
 pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, ConfigError> {
     let config_path = asset_root.join(CONFIG_PATH);
     let lock_path = asset_root.join(LOCK_PATH);
@@ -199,9 +290,11 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
     let lock: AssetLock = parse_ron(&lock_path)?;
 
     config.validate()?;
+    validate_digest(&lock_path, &lock.sha256)?;
 
     let license_path = asset_root.join(&config.license_path);
     let license_bytes = read(&license_path)?;
+    ensure_within_root("license_path", asset_root, &license_path)?;
     if license_bytes.is_empty() {
         return Err(ConfigError::EmptyLicense { path: license_path });
     }
@@ -215,9 +308,10 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
 
     let model_path = asset_root.join(&config.gltf_path);
     let model_bytes = read(&model_path)?;
+    ensure_within_root("gltf_path", asset_root, &model_path)?;
     let actual_hash = format!("{:x}", Sha256::digest(&model_bytes));
     let actual_size = model_bytes.len() as u64;
-    if actual_hash != lock.sha256 || actual_size != lock.byte_size {
+    if !actual_hash.eq_ignore_ascii_case(&lock.sha256) || actual_size != lock.byte_size {
         return Err(ConfigError::Integrity {
             path: model_path,
             expected_hash: lock.sha256,
@@ -230,10 +324,16 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
     Ok(config)
 }
 
+/// Parses strict UTF-8 RON. Lossy decoding is deliberately avoided: silently
+/// substituting U+FFFD for invalid bytes would let a corrupted manifest parse
+/// into a plausible-looking contract.
 fn parse_ron<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, ConfigError> {
     let bytes = read(path)?;
-    let text = String::from_utf8_lossy(&bytes);
-    ron::from_str(&text).map_err(|source| ConfigError::Parse {
+    let text = std::str::from_utf8(&bytes).map_err(|source| ConfigError::Utf8 {
+        path: path.to_owned(),
+        source,
+    })?;
+    ron::from_str(text).map_err(|source| ConfigError::Parse {
         path: path.to_owned(),
         source: Box::new(source),
     })

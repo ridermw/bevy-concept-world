@@ -76,21 +76,28 @@ impl Fixture {
     yaw_degrees: {},
     root_motion: {},
 )"#,
-            self.id,
-            self.gltf_path,
-            self.source_url,
-            self.pack_version,
-            self.downloaded_on,
-            self.license,
-            self.license_path,
-            self.scene_name,
-            self.animation_name,
+            escape(&self.id),
+            escape(&self.gltf_path),
+            escape(&self.source_url),
+            escape(&self.pack_version),
+            escape(&self.downloaded_on),
+            escape(&self.license),
+            escape(&self.license_path),
+            escape(&self.scene_name),
+            escape(&self.animation_name),
             self.expected_animation_players,
             self.scale,
             self.yaw_degrees,
             self.root_motion,
         )
     }
+}
+
+/// Escapes a value for a RON string literal, so a fixture can carry a
+/// Windows-style path such as `..\..\evil.glb` without the backslashes being
+/// read as escape sequences.
+fn escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Writes a complete, self-consistent fixture tree:
@@ -110,7 +117,7 @@ fn write_fixture(fixture: &Fixture) -> TempDir {
         asset_dir.join("asset.lock.ron"),
         format!(
             r#"(gltf_path: "{}", sha256: "{}", byte_size: {})"#,
-            fixture.gltf_path,
+            escape(&fixture.gltf_path),
             sha256,
             MODEL_BYTES.len()
         ),
@@ -122,6 +129,40 @@ fn write_fixture(fixture: &Fixture) -> TempDir {
 
 fn asset_dir(root: &TempDir) -> PathBuf {
     root.path().join("characters/quaternius")
+}
+
+/// Overwrites the fixture lock with an explicit digest and size, so tests can
+/// exercise malformed, uppercase, and mismatched locks.
+fn write_lock(root: &TempDir, gltf_path: &str, sha256: &str, byte_size: usize) {
+    let gltf_path = escape(gltf_path);
+    fs::write(
+        asset_dir(root).join("asset.lock.ron"),
+        format!(r#"(gltf_path: "{gltf_path}", sha256: "{sha256}", byte_size: {byte_size})"#),
+    )
+    .unwrap();
+}
+
+fn model_sha256() -> String {
+    format!("{:x}", Sha256::digest(MODEL_BYTES))
+}
+
+/// Creates a file symlink, returning `false` when the platform refuses (an
+/// unprivileged Windows session without Developer Mode). Callers skip rather
+/// than fail so the suite stays green on stock Windows checkouts.
+fn try_symlink_file(target: &Path, link: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(target, link).is_ok()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (target, link);
+        false
+    }
 }
 
 #[test]
@@ -141,18 +182,137 @@ fn loads_a_valid_character_contract() {
 }
 
 #[test]
-fn rejects_a_changed_model() {
+fn rejects_a_model_whose_bytes_changed_at_the_same_size() {
     let fixture = Fixture::default();
     let root = write_fixture(&fixture);
-    fs::write(
-        asset_dir(&root).join("model.glb"),
-        b"these bytes differ from the lock",
-    )
-    .unwrap();
+    let mut changed = MODEL_BYTES.to_vec();
+    let last = changed.len() - 1;
+    changed[last] ^= 0xff;
+    assert_eq!(changed.len(), MODEL_BYTES.len());
+    fs::write(asset_dir(&root).join("model.glb"), &changed).unwrap();
 
-    let result = load_character_config(root.path());
+    let error = load_character_config(root.path()).unwrap_err();
 
-    assert!(matches!(result, Err(ConfigError::Integrity { .. })));
+    match error {
+        ConfigError::Integrity {
+            expected_hash,
+            expected_size,
+            actual_hash,
+            actual_size,
+            ..
+        } => {
+            assert_eq!(
+                expected_size, actual_size,
+                "this fixture changes bytes without changing size"
+            );
+            assert_ne!(expected_hash, actual_hash);
+            assert_eq!(expected_hash, model_sha256());
+        }
+        other => panic!("expected an integrity mismatch, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_a_model_whose_size_changed_behind_the_same_prefix() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let mut extended = MODEL_BYTES.to_vec();
+    extended.extend_from_slice(b" plus trailing bytes");
+    fs::write(asset_dir(&root).join("model.glb"), &extended).unwrap();
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::Integrity {
+            expected_size,
+            actual_size,
+            expected_hash,
+            actual_hash,
+            ..
+        } => {
+            assert_eq!(expected_size, MODEL_BYTES.len() as u64);
+            assert_eq!(actual_size, extended.len() as u64);
+            assert_ne!(expected_hash, actual_hash);
+        }
+        other => panic!("expected an integrity mismatch, got {other}"),
+    }
+}
+
+#[test]
+fn accepts_an_uppercase_lock_digest() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    write_lock(
+        &root,
+        &fixture.gltf_path,
+        &model_sha256().to_uppercase(),
+        MODEL_BYTES.len(),
+    );
+
+    let config = load_character_config(root.path())
+        .expect("a correct digest in uppercase hex must be accepted");
+
+    assert_eq!(config.id, "fixture");
+}
+
+#[test]
+fn rejects_a_lock_digest_that_is_too_short() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    write_lock(&root, &fixture.gltf_path, "deadbeef", MODEL_BYTES.len());
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::InvalidDigest { value, .. } => assert_eq!(value, "deadbeef"),
+        other => panic!("expected a malformed digest error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_a_lock_digest_that_is_too_long() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let too_long = format!("{}0", model_sha256());
+    write_lock(&root, &fixture.gltf_path, &too_long, MODEL_BYTES.len());
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::InvalidDigest { value, .. } => assert_eq!(value, too_long),
+        other => panic!("expected a malformed digest error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_a_lock_digest_with_non_hex_characters() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let non_hex = "z".repeat(64);
+    write_lock(&root, &fixture.gltf_path, &non_hex, MODEL_BYTES.len());
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::InvalidDigest { value, .. } => assert_eq!(value, non_hex),
+        other => panic!("expected a malformed digest error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_a_lock_digest_with_non_ascii_characters() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    // 64 characters, but not 64 ASCII hex bytes.
+    let non_ascii = format!("{}é", &model_sha256()[..63]);
+    write_lock(&root, &fixture.gltf_path, &non_ascii, MODEL_BYTES.len());
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::InvalidDigest { value, .. } => assert_eq!(value, non_ascii),
+        other => panic!("expected a malformed digest error, got {other}"),
+    }
 }
 
 #[test]
@@ -161,9 +321,14 @@ fn rejects_missing_license_file() {
     let root = write_fixture(&fixture);
     fs::remove_file(asset_dir(&root).join("LICENSE.txt")).unwrap();
 
-    let result = load_character_config(root.path());
+    let error = load_character_config(root.path()).unwrap_err();
 
-    assert!(matches!(result, Err(ConfigError::Read { .. })));
+    match error {
+        ConfigError::Read { path, .. } => {
+            assert_eq!(path, asset_dir(&root).join("LICENSE.txt"));
+        }
+        other => panic!("expected a missing-license read error, got {other}"),
+    }
 }
 
 #[test]
@@ -368,6 +533,230 @@ fn rejects_absolute_gltf_path() {
     ));
 }
 
+/// Every absolute syntax must be rejected on every host, not only on the OS
+/// whose `Path` implementation happens to understand it.
+#[test]
+fn rejects_every_absolute_path_syntax_on_every_platform() {
+    let cases = [
+        "C:/Windows/System32/evil.glb",
+        "C:\\Windows\\System32\\evil.glb",
+        "c:/windows/evil.glb",
+        "C:evil.glb",
+        "/etc/evil.glb",
+        "\\etc\\evil.glb",
+        "//server/share/evil.glb",
+        "\\\\server\\share\\evil.glb",
+    ];
+
+    for case in cases {
+        let mut fixture = Fixture::default();
+        fixture.gltf_path = case.to_string();
+        let root = write_fixture(&fixture);
+
+        let result = load_character_config(root.path());
+
+        assert!(
+            matches!(
+                result,
+                Err(ConfigError::InvalidPath {
+                    field: "gltf_path",
+                    ..
+                })
+            ),
+            "gltf_path {case:?} must be rejected as absolute, got {result:?}"
+        );
+    }
+}
+
+/// `..` must be caught whichever separator spells it, because a manifest is
+/// authored once and loaded on every platform.
+#[test]
+fn rejects_every_traversal_separator_on_every_platform() {
+    let cases = [
+        "../../etc/evil.glb",
+        "..\\..\\etc\\evil.glb",
+        "characters/quaternius/../../../evil.glb",
+        "characters\\quaternius\\..\\..\\..\\evil.glb",
+        "characters/quaternius\\..\\evil.glb",
+    ];
+
+    for case in cases {
+        let mut fixture = Fixture::default();
+        fixture.license_path = case.to_string();
+        let root = write_fixture(&fixture);
+
+        let result = load_character_config(root.path());
+
+        assert!(
+            matches!(
+                result,
+                Err(ConfigError::InvalidPath {
+                    field: "license_path",
+                    ..
+                })
+            ),
+            "license_path {case:?} must be rejected as traversing, got {result:?}"
+        );
+    }
+}
+
+#[test]
+fn rejects_a_model_symlinked_outside_the_asset_root() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let outside = tempdir().unwrap();
+    let outside_model = outside.path().join("model.glb");
+    // Identical bytes, so only containment — never the digest — can reject it.
+    fs::write(&outside_model, MODEL_BYTES).unwrap();
+    let inside_model = asset_dir(&root).join("model.glb");
+    fs::remove_file(&inside_model).unwrap();
+
+    if !try_symlink_file(&outside_model, &inside_model) {
+        eprintln!("skipping: this session cannot create file symlinks");
+        return;
+    }
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::EscapesAssetRoot {
+            field,
+            root: reported_root,
+            resolved,
+        } => {
+            assert_eq!(field, "gltf_path");
+            assert!(!resolved.starts_with(&reported_root));
+            assert!(resolved.ends_with("model.glb"));
+        }
+        other => panic!("expected an asset-root escape error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_a_license_symlinked_outside_the_asset_root() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let outside = tempdir().unwrap();
+    let outside_license = outside.path().join("LICENSE.txt");
+    fs::write(&outside_license, "CC0 1.0 Universal\n").unwrap();
+    let inside_license = asset_dir(&root).join("LICENSE.txt");
+    fs::remove_file(&inside_license).unwrap();
+
+    if !try_symlink_file(&outside_license, &inside_license) {
+        eprintln!("skipping: this session cannot create file symlinks");
+        return;
+    }
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::EscapesAssetRoot {
+            field,
+            root: reported_root,
+            resolved,
+        } => {
+            assert_eq!(field, "license_path");
+            assert!(!resolved.starts_with(&reported_root));
+            assert!(resolved.ends_with("LICENSE.txt"));
+        }
+        other => panic!("expected an asset-root escape error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_config_ron_that_is_not_utf8() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let mut bytes = fixture.to_ron().into_bytes();
+    // 0xff can never begin a valid UTF-8 sequence.
+    bytes.insert(0, 0xff);
+    fs::write(asset_dir(&root).join("character.ron"), &bytes).unwrap();
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::Utf8 { path, .. } => {
+            assert_eq!(path, asset_dir(&root).join("character.ron"));
+        }
+        other => panic!("expected a UTF-8 error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_lock_ron_that_is_not_utf8() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    fs::write(
+        asset_dir(&root).join("asset.lock.ron"),
+        [b'(', 0x80, 0xfe, b')'],
+    )
+    .unwrap();
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::Utf8 { path, .. } => {
+            assert_eq!(path, asset_dir(&root).join("asset.lock.ron"));
+        }
+        other => panic!("expected a UTF-8 error, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_config_ron_missing_a_required_field() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    let without_animation_name = fixture
+        .to_ron()
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("animation_name:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!without_animation_name.contains("animation_name"));
+    fs::write(
+        asset_dir(&root).join("character.ron"),
+        &without_animation_name,
+    )
+    .unwrap();
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::Parse { path, source } => {
+            assert_eq!(path, asset_dir(&root).join("character.ron"));
+            assert!(
+                source.to_string().contains("animation_name"),
+                "the parse error must name the omitted field, got {source}"
+            );
+        }
+        other => panic!("expected a parse error for the omitted field, got {other}"),
+    }
+}
+
+#[test]
+fn rejects_lock_ron_missing_a_required_field() {
+    let fixture = Fixture::default();
+    let root = write_fixture(&fixture);
+    fs::write(
+        asset_dir(&root).join("asset.lock.ron"),
+        format!(r#"(gltf_path: "{}", byte_size: 1)"#, fixture.gltf_path),
+    )
+    .unwrap();
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    match error {
+        ConfigError::Parse { path, source } => {
+            assert_eq!(path, asset_dir(&root).join("asset.lock.ron"));
+            assert!(
+                source.to_string().contains("sha256"),
+                "the parse error must name the omitted field, got {source}"
+            );
+        }
+        other => panic!("expected a parse error for the omitted field, got {other}"),
+    }
+}
+
 #[test]
 fn rejects_path_traversal_gltf_path() {
     let mut fixture = Fixture::default();
@@ -475,9 +864,14 @@ fn rejects_missing_config_file() {
     let root = write_fixture(&fixture);
     fs::remove_file(asset_dir(&root).join("character.ron")).unwrap();
 
-    let result = load_character_config(root.path());
+    let error = load_character_config(root.path()).unwrap_err();
 
-    assert!(matches!(result, Err(ConfigError::Read { .. })));
+    match error {
+        ConfigError::Read { path, .. } => {
+            assert_eq!(path, asset_dir(&root).join("character.ron"));
+        }
+        other => panic!("expected a missing-manifest read error, got {other}"),
+    }
 }
 
 #[test]
@@ -486,9 +880,14 @@ fn rejects_missing_lock_file() {
     let root = write_fixture(&fixture);
     fs::remove_file(asset_dir(&root).join("asset.lock.ron")).unwrap();
 
-    let result = load_character_config(root.path());
+    let error = load_character_config(root.path()).unwrap_err();
 
-    assert!(matches!(result, Err(ConfigError::Read { .. })));
+    match error {
+        ConfigError::Read { path, .. } => {
+            assert_eq!(path, asset_dir(&root).join("asset.lock.ron"));
+        }
+        other => panic!("expected a missing-lock read error, got {other}"),
+    }
 }
 
 #[test]
@@ -497,17 +896,24 @@ fn rejects_missing_model_file() {
     let root = write_fixture(&fixture);
     fs::remove_file(asset_dir(&root).join("model.glb")).unwrap();
 
-    let result = load_character_config(root.path());
+    let error = load_character_config(root.path()).unwrap_err();
 
-    assert!(matches!(result, Err(ConfigError::Read { .. })));
+    match error {
+        ConfigError::Read { path, .. } => {
+            assert_eq!(path, asset_dir(&root).join("model.glb"));
+        }
+        other => panic!("expected a missing-model read error, got {other}"),
+    }
 }
 
-/// Validates the real checked-in Quaternius contract, run relative to the
-/// crate root (Cargo sets the integration test binary's working directory
-/// there), never a fixture.
+/// Validates the real checked-in Quaternius contract, resolved from the crate
+/// manifest directory rather than the process working directory, never a
+/// fixture.
 #[test]
 fn validates_the_real_quaternius_contract() {
-    let config = load_character_config(Path::new("assets"))
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+
+    let config = load_character_config(&asset_root)
         .expect("the checked-in Quaternius contract must be valid");
 
     assert_eq!(

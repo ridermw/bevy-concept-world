@@ -243,7 +243,7 @@ publish = false
 
 [dependencies]
 bevy = "=0.19.1"
-ron = "0.10"
+ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "2"
@@ -399,6 +399,7 @@ $size = (Get-Item -LiteralPath $modelTarget).Length
 
 @"
 (
+    gltf_path: "characters/quaternius/UAL1_Standard.glb",
     sha256: "$hash",
     byte_size: $size,
 )
@@ -495,7 +496,7 @@ git commit -m "assets: import CC0 Quaternius humanoid" `
 Create `tests/config_contract.rs`:
 
 ```rust
-use bevy_concept_world::config::{CharacterConfig, ConfigError, load_character_config};
+use bevy_concept_world::config::{ConfigError, load_character_config};
 use std::fs;
 use tempfile::tempdir;
 
@@ -558,9 +559,26 @@ fn rejects_a_changed_model() {
 
 #[test]
 fn rejects_non_positive_scale() {
-    let mut config = CharacterConfig::fixture();
-    config.scale = 0.0;
-    assert!(matches!(config.validate(), Err(ConfigError::InvalidScale(0.0))));
+    let root = tempdir().unwrap();
+    let asset_dir = root.path().join("characters/quaternius");
+    fs::create_dir_all(&asset_dir).unwrap();
+    fs::write(asset_dir.join("model.glb"), b"known model").unwrap();
+    fs::write(asset_dir.join("LICENSE.txt"), "CC0-1.0").unwrap();
+    fs::write(
+        asset_dir.join("character.ron"),
+        valid_manifest().replace("scale: 1.0", "scale: 0.0"),
+    )
+    .unwrap();
+    fs::write(
+        asset_dir.join("asset.lock.ron"),
+        r#"(gltf_path: "characters/quaternius/model.glb", sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        load_character_config(root.path()),
+        Err(ConfigError::InvalidScale(0.0))
+    ));
 }
 
 fn valid_manifest() -> &'static str {
@@ -643,12 +661,17 @@ pub enum ConfigError {
     #[error("failed to parse {path}: {source}")]
     Parse {
         path: PathBuf,
-        source: ron::error::SpannedError,
+        source: Box<ron::error::SpannedError>,
+    },
+    #[error("{path} is not valid UTF-8: {source}")]
+    Utf8 {
+        path: PathBuf,
+        source: std::str::Utf8Error,
     },
     #[error("character scale must be positive and finite, got {0}")]
     InvalidScale(f32),
-    #[error("expected at least one animation player")]
-    InvalidPlayerCount,
+    #[error("expected_animation_players must be at least 1, got 0")]
+    ZeroAnimationPlayers,
     #[error("root motion must be disabled for this prototype")]
     RootMotionEnabled,
     #[error("asset.lock.ron locks {locked}, but character.ron declares {declared}")]
@@ -663,35 +686,20 @@ pub enum ConfigError {
 }
 
 impl CharacterConfig {
-    pub fn validate(&self) -> Result<(), ConfigError> {
+    /// Private: callers only ever observe validation through
+    /// `load_character_config`, so there is no public `validate` to call and
+    /// no test-only constructor to keep in sync with the manifest.
+    fn validate(&self) -> Result<(), ConfigError> {
         if !self.scale.is_finite() || self.scale <= 0.0 {
             return Err(ConfigError::InvalidScale(self.scale));
         }
         if self.expected_animation_players == 0 {
-            return Err(ConfigError::InvalidPlayerCount);
+            return Err(ConfigError::ZeroAnimationPlayers);
         }
         if self.root_motion {
             return Err(ConfigError::RootMotionEnabled);
         }
         Ok(())
-    }
-
-    pub fn fixture() -> Self {
-        Self {
-            id: "fixture".into(),
-            gltf_path: "characters/quaternius/model.glb".into(),
-            source_url: "https://example.invalid/model".into(),
-            pack_version: "1".into(),
-            downloaded_on: "2026-08-31".into(),
-            license: "CC0-1.0".into(),
-            license_path: "characters/quaternius/LICENSE.txt".into(),
-            scene_name: "Scene".into(),
-            animation_name: "Walk_Loop".into(),
-            expected_animation_players: 1,
-            scale: 1.0,
-            yaw_degrees: 0.0,
-            root_motion: false,
-        }
     }
 }
 
@@ -727,10 +735,13 @@ pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, Confi
 }
 
 fn parse_ron<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, ConfigError> {
-    let text = String::from_utf8_lossy(&read(path)?).into_owned();
-    ron::from_str(&text).map_err(|source| ConfigError::Parse {
+    let text = std::str::from_utf8(&read(path)?).map_err(|source| ConfigError::Utf8 {
         path: path.to_owned(),
         source,
+    })?.to_owned();
+    ron::from_str(&text).map_err(|source| ConfigError::Parse {
+        path: path.to_owned(),
+        source: Box::new(source),
     })
 }
 
@@ -741,6 +752,17 @@ fn read(path: &Path) -> Result<Vec<u8>, ConfigError> {
     })
 }
 ```
+
+> **As built.** `src/config.rs` is the source of truth and goes further than
+> this sketch: it also rejects blank required fields; rejects rooted,
+> drive-qualified, and traversing `gltf_path`/`license_path` values in both
+> Unix and Windows syntax on every host; canonicalizes the resolved license
+> and GLB paths and rejects anything escaping the canonical asset root through
+> a symlink or junction (`ConfigError::EscapesAssetRoot`); requires the lock
+> digest to be exactly 64 ASCII hex characters (`ConfigError::InvalidDigest`)
+> and compares it case-insensitively; and requires a non-empty license file
+> (`ConfigError::EmptyLicense`). Read the file rather than this snippet before
+> extending it.
 
 - [ ] **Step 4: Run the contract tests**
 
@@ -1389,41 +1411,14 @@ git commit -m "feat: add humanoid diagnostics and controls" `
 
 - [ ] **Step 1: Add remaining contract tests**
 
-Append to `tests/config_contract.rs`:
-
-```rust
-#[test]
-fn rejects_missing_license_file() {
-    let root = tempdir().unwrap();
-    let asset_dir = root.path().join("characters/quaternius");
-    fs::create_dir_all(&asset_dir).unwrap();
-    fs::write(asset_dir.join("model.glb"), b"known model").unwrap();
-    fs::write(asset_dir.join("character.ron"), valid_manifest()).unwrap();
-    fs::write(
-        asset_dir.join("asset.lock.ron"),
-        r#"(gltf_path: "characters/quaternius/model.glb", sha256: "f5c932e75140f77efb96fb611594e19cca0719a267df98edafe8948a4a6acb63", byte_size: 11)"#,
-    )
-    .unwrap();
-
-    let error = load_character_config(root.path()).unwrap_err();
-    match error {
-        ConfigError::Read { path, .. } => {
-            assert!(path.ends_with("characters/quaternius/LICENSE.txt"));
-        }
-        other => panic!("expected missing-license read error, got {other}"),
-    }
-}
-
-#[test]
-fn rejects_root_motion_for_the_first_milestone() {
-    let mut config = CharacterConfig::fixture();
-    config.root_motion = true;
-    assert!(matches!(
-        config.validate(),
-        Err(ConfigError::RootMotionEnabled)
-    ));
-}
-```
+`tests/config_contract.rs` already covers the manifest, path-safety, UTF-8,
+digest-format, and integrity failure paths that Task 4 introduced, including
+the missing-license case, root motion, and the real checked-in contract under
+`env!("CARGO_MANIFEST_DIR")/assets`. Re-read that file before adding anything:
+it drives every case through a real temporary fixture tree and
+`load_character_config`, so there is no public `CharacterConfig::validate` and
+no `CharacterConfig::fixture()` to call. Add only what is still missing for
+this task.
 
 Append to `tests/app_contract.rs`:
 
