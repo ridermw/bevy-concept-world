@@ -408,6 +408,11 @@ impl HumanoidController {
     }
 }
 
+/// The diagnostics line shown while the humanoid is still turning around.
+pub fn movement_status_line(turning_around: bool) -> Option<&'static str> {
+    turning_around.then_some("Movement: turning around")
+}
+
 /// Converts the arrow-key state into a locomotion request.
 pub fn movement_input_from_keys(keys: &ButtonInput<KeyCode>) -> MovementInput {
     let left = keys.pressed(KeyCode::ArrowLeft);

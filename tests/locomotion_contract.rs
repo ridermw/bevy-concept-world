@@ -16,8 +16,8 @@ use bevy_concept_world::{
     locomotion::{
         CAMERA_MAX_DISTANCE, CAMERA_MIN_DISTANCE, FORWARD_SPEED, HumanoidController,
         LocomotionPlugin, MovementInput, OrbitCamera, STEERING_RATE, Turnaround, advance_heading,
-        forward_delta, movement_input_from_keys, normalize_angle, orbit_camera_transform,
-        orbit_yaw, smooth_distance, steered_delta, zoom_target,
+        forward_delta, movement_input_from_keys, movement_status_line, normalize_angle,
+        orbit_camera_transform, orbit_yaw, smooth_distance, steered_delta, zoom_target,
     },
     state::PrototypeState,
 };
@@ -719,6 +719,12 @@ fn active_turnarounds_ignore_normal_steering() {
     assert_close(left.heading, right.heading);
     assert_vec3_close(left.translation, right.translation);
     assert_eq!(steer_left.turnaround(), steer_right.turnaround());
+}
+
+#[test]
+fn movement_status_line_is_only_present_for_an_active_turnaround() {
+    assert_eq!(movement_status_line(false), None);
+    assert_eq!(movement_status_line(true), Some("Movement: turning around"));
 }
 
 #[test]

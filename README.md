@@ -59,14 +59,21 @@ Controls:
 
 | Key | Effect |
 |---|---|
+| `Up` | Walk straight ahead |
+| `Left` / `Right` | Walk forward while steering left or right |
+| `Down` | Start one eased 180° turnaround; while held, keep translating through the turn; releasing stops translation, but the active turn still finishes |
+| `Q` / `E` | Orbit the camera left or right |
+| Mouse wheel | Zoom the orbit camera, clamped to the configured minimum and maximum distance |
 | `Space` | Pause or resume the walk animation without reloading the asset |
 | `P` | Write `docs/validation/humanoid-walk.png` from the fixed inspection camera |
 | `Esc` | Exit — with a **nonzero** exit code if the run is in `Failed`, zero otherwise |
 
+The in-place walk animation stays in place when no movement key is held, and the human steering-feel gate remains manual: watch the live motion, orbit, zoom, and turnaround behavior on a GPU desktop session and record the result yourself.
+
 The on-screen overlay reports the runtime state, the asset, the selected scene and clip, the
 number of animation players discovered in the spawned scene *and* how many of them were wired
 to an animation graph, the clip duration and playback speed, and the full detail of any fatal
-failure.
+failure. While a turnaround is active it also shows `Movement: turning around`.
 
 The log carries the performance numbers: one `performance baseline:` line on reaching
 `Running`, and a filtered `frame_time` / `fps` line every five seconds. See
@@ -127,6 +134,7 @@ Asset: characters/quaternius/UAL1_Standard.glb
 Scene: Scene   Clip: Walk_Loop
 Animation players: 1 (1 with an animation graph)
   clip 1.33s  speed 1.00x  playing
+Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom
 Space: pause/resume   P: screenshot   Esc: exit
 ```
 
@@ -134,6 +142,9 @@ Then press `P`. That writes `docs/validation/humanoid-walk.png` — relative to 
 directory, so run it from the repository root — from the fixed inspection camera. Press
 `Space` once to confirm the overlay flips to `paused` and the pose freezes, press it again to
 confirm it resumes, then press `Esc` (exit code `0` from `Running`).
+
+If `ArrowDown` is holding an active turnaround, the overlay also shows `Movement: turning around`
+above the help lines.
 
 **The PNG and the live window prove different things, and the difference matters.** A single
 still frame can only show the static criteria — upright posture, scale against the one-meter

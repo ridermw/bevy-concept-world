@@ -1,4 +1,4 @@
-//! On-screen diagnostics, the prototype's three keyboard controls, and the
+//! On-screen diagnostics, the prototype's keyboard controls, and the
 //! unattended screenshot capture used on hosts with no desktop session.
 //!
 //! The overlay must keep working when the character manifest never loaded, so
@@ -23,7 +23,9 @@ use bevy::{
 use thiserror::Error;
 
 use crate::{
+    character::Humanoid,
     config::CharacterConfig,
+    locomotion::{HumanoidController, movement_status_line},
     state::{FailureReport, PrototypeState, escape_exit},
 };
 
@@ -185,6 +187,16 @@ impl Plugin for DiagnosticsPlugin {
 #[derive(Component)]
 struct StatusText;
 
+const CONTROL_HELP_LINES: [&str; 2] = [
+    "Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom",
+    "Space: pause/resume   P: screenshot   Esc: exit",
+];
+
+/// The concise control help shown in the overlay.
+pub fn control_help_lines() -> [&'static str; 2] {
+    CONTROL_HELP_LINES
+}
+
 /// The capture target. Kept relative to the working directory so a scripted
 /// run writes into the repository it was launched from.
 pub fn screenshot_path() -> PathBuf {
@@ -237,6 +249,7 @@ fn update_overlay(
     report: Res<FailureReport>,
     clips: Res<Assets<AnimationClip>>,
     graphs: Res<Assets<AnimationGraph>>,
+    controllers: Query<&HumanoidController, With<Humanoid>>,
     // Every player in the world, whether or not a graph was attached to it. A
     // count taken only from graph-carrying players would report the expected
     // number by construction and hide the exact defect — a discovered player
@@ -286,13 +299,20 @@ fn update_overlay(
         }
     }
 
+    if let Some(line) = controllers
+        .iter()
+        .find_map(|controller| movement_status_line(controller.turning_around()))
+    {
+        lines.push(line.to_string());
+    }
+
     if report.is_recorded() {
         lines.push(String::new());
         lines.push(format!("FAILED: {}", report.to_display_string()));
     }
 
     lines.push(String::new());
-    lines.push("Space: pause/resume   P: screenshot   Esc: exit".to_string());
+    lines.extend(control_help_lines().into_iter().map(str::to_string));
 
     let text = lines.join("\n");
     for mut overlay in &mut overlay {

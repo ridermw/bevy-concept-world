@@ -15,6 +15,7 @@ use bevy_concept_world::{
         validate_named_assets,
     },
     config::load_character_config,
+    diagnostics::control_help_lines,
     state::FailureReport,
 };
 
@@ -293,4 +294,31 @@ fn the_checked_in_glb_has_one_skin_matching_the_expected_animation_player_count(
         skins, config.expected_animation_players,
         "the manifest expects one animation player per animated skeleton"
     );
+}
+
+#[test]
+fn the_overlay_exposes_the_updated_control_help_lines() {
+    assert_eq!(
+        control_help_lines(),
+        [
+            "Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom",
+            "Space: pause/resume   P: screenshot   Esc: exit",
+        ]
+    );
+}
+
+#[test]
+fn main_still_registers_the_locomotion_plugin() {
+    let main_rs = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
+
+    assert!(main_rs.contains("LocomotionPlugin"), "{main_rs}");
+}
+
+#[test]
+fn legacy_space_p_and_escape_handling_remains_in_the_controls_system() {
+    let diagnostics = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/diagnostics.rs"));
+
+    assert!(diagnostics.contains("KeyCode::Space"), "{diagnostics}");
+    assert!(diagnostics.contains("KeyCode::KeyP"), "{diagnostics}");
+    assert!(diagnostics.contains("KeyCode::Escape"), "{diagnostics}");
 }
