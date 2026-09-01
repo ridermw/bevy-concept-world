@@ -10,6 +10,7 @@ use bevy_concept_world::{
     asset_root,
     character::CharacterPlugin,
     config::load_character_config,
+    diagnostics::DiagnosticsPlugin,
     inspection::InspectionPlugin,
     state::{FailureReport, PrototypeState},
 };
@@ -34,7 +35,7 @@ fn main() -> AppExit {
                 ..default()
             }),
     )
-    .add_plugins((InspectionPlugin, CharacterPlugin))
+    .add_plugins((InspectionPlugin, CharacterPlugin, DiagnosticsPlugin))
     .init_resource::<FailureReport>();
 
     // The state is inserted exactly once, after `DefaultPlugins` has created

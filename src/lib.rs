@@ -3,6 +3,7 @@
 
 pub mod character;
 pub mod config;
+pub mod diagnostics;
 pub mod inspection;
 pub mod state;
 
