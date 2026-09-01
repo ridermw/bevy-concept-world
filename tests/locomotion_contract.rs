@@ -209,7 +209,11 @@ fn down_starts_only_one_turnaround_until_it_finishes() {
         },
         Duration::from_millis(125),
     );
-    assert_eq!(after.translation, Vec3::ZERO);
+    assert!(!after.turning_around);
+    assert_vec3_close(
+        after.translation,
+        forward_delta(after.heading, FORWARD_SPEED, 0.125),
+    );
     assert!(controller.turnaround().is_none());
 }
 
@@ -230,6 +234,68 @@ fn releasing_down_stops_translation_without_cancelling_the_turn() {
     assert_eq!(update.translation, Vec3::ZERO);
     assert!(update.turning_around);
     assert!(controller.turnaround().is_some());
+}
+
+#[test]
+fn held_down_applies_turn_remainder_then_walks_straight_without_requeueing() {
+    let mut overrun = HumanoidController::default();
+    overrun.update(
+        MovementInput {
+            turnaround_pressed: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(700),
+    );
+
+    let mut split = overrun;
+    let turning_tail = split.update(
+        MovementInput {
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(50),
+    );
+    assert!(!turning_tail.turning_around);
+    let straight_tail = split.update(
+        MovementInput {
+            forward: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(50),
+    );
+    assert!(split.turnaround().is_none());
+
+    let overrun_update = overrun.update(
+        MovementInput {
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(100),
+    );
+
+    assert!(!overrun_update.turning_around);
+    assert!(overrun.turnaround().is_none());
+    assert_close(overrun_update.heading, turning_tail.heading);
+    assert_vec3_close(
+        overrun_update.translation,
+        turning_tail.translation + straight_tail.translation,
+    );
+
+    let continued = overrun.update(
+        MovementInput {
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(25),
+    );
+    assert!(!continued.turning_around);
+    assert_vec3_close(
+        continued.translation,
+        forward_delta(continued.heading, FORWARD_SPEED, 0.025),
+    );
+    assert!(overrun.turnaround().is_none());
 }
 
 #[test]

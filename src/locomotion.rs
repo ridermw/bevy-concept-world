@@ -182,6 +182,7 @@ impl Turnaround {
 pub struct HumanoidController {
     heading: f32,
     turnaround: Option<Turnaround>,
+    walking_after_turnaround: bool,
 }
 
 impl HumanoidController {
@@ -202,13 +203,21 @@ impl HumanoidController {
 
     /// Advances the controller by one frame of input and time.
     pub fn update(&mut self, input: MovementInput, delta: Duration) -> MovementUpdate {
+        if !input.turnaround_held {
+            self.walking_after_turnaround = false;
+        }
+
         if input.turnaround_pressed && self.turnaround.is_none() {
             self.turnaround = Some(Turnaround::new(self.heading));
         }
 
         if let Some(turnaround) = &mut self.turnaround {
-            let translation = if input.turnaround_held {
-                turnaround.translation_over(delta, FORWARD_SPEED)
+            let turn_delta = TURNAROUND_DURATION
+                .saturating_sub(turnaround.elapsed)
+                .min(delta);
+            let leftover_delta = delta.saturating_sub(turn_delta);
+            let mut translation = if input.turnaround_held {
+                turnaround.translation_over(turn_delta, FORWARD_SPEED)
             } else {
                 Vec3::ZERO
             };
@@ -216,6 +225,11 @@ impl HumanoidController {
             self.heading = step.heading;
             if step.complete {
                 self.turnaround = None;
+                self.walking_after_turnaround = input.turnaround_held;
+                if input.turnaround_held && !leftover_delta.is_zero() {
+                    translation +=
+                        forward_delta(self.heading, FORWARD_SPEED, leftover_delta.as_secs_f32());
+                }
             }
 
             return MovementUpdate {
@@ -228,7 +242,7 @@ impl HumanoidController {
         self.heading = advance_heading(self.heading, input.steering, delta.as_secs_f32());
         MovementUpdate {
             heading: self.heading,
-            translation: if input.forward {
+            translation: if input.forward || self.walking_after_turnaround {
                 forward_delta(self.heading, FORWARD_SPEED, delta.as_secs_f32())
             } else {
                 Vec3::ZERO
