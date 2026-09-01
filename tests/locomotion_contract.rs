@@ -8,8 +8,9 @@ use bevy_concept_world::{
     character::{Humanoid, character_transform},
     config::CharacterConfig,
     locomotion::{
-        FORWARD_SPEED, HumanoidController, LocomotionPlugin, MovementInput, Turnaround,
-        advance_heading, forward_delta, movement_input_from_keys, normalize_angle,
+        FORWARD_SPEED, HumanoidController, LocomotionPlugin, MovementInput, STEERING_RATE,
+        Turnaround, advance_heading, forward_delta, movement_input_from_keys, normalize_angle,
+        steered_delta,
     },
     state::PrototypeState,
 };
@@ -330,10 +331,9 @@ fn left_and_right_mapping_are_symmetric_and_cancel_when_both_are_held() {
 }
 
 #[test]
-fn normal_forward_motion_advances_heading_and_translation_at_forward_speed() {
-    let mut controller = HumanoidController::default();
-
-    let update = controller.update(
+fn normal_left_steering_matches_the_same_arc_across_frame_chunking() {
+    let mut single_step = HumanoidController::default();
+    let single = single_step.update(
         MovementInput {
             forward: true,
             steering: 1.0,
@@ -342,13 +342,98 @@ fn normal_forward_motion_advances_heading_and_translation_at_forward_speed() {
         Duration::from_secs(1),
     );
 
-    assert_close(update.heading, FRAC_PI_2);
-    assert_vec3_close(
-        update.translation,
-        forward_delta(FRAC_PI_2, FORWARD_SPEED, 1.0),
+    let mut repeated = HumanoidController::default();
+    let repeated_translation = (0..10).fold(Vec3::ZERO, |translation, _| {
+        let update = repeated.update(
+            MovementInput {
+                forward: true,
+                steering: 1.0,
+                ..default()
+            },
+            Duration::from_millis(100),
+        );
+        translation + update.translation
+    });
+
+    let radius = FORWARD_SPEED / STEERING_RATE;
+    assert_close(single.heading, FRAC_PI_2);
+    assert_close(single.heading, repeated.heading());
+    assert_vec3_close(single.translation, Vec3::new(-radius, 0.0, -radius));
+    assert_vec3_close(single.translation, repeated_translation);
+    assert!(!single.turning_around);
+}
+
+#[test]
+fn normal_right_steering_matches_the_same_arc_across_frame_chunking() {
+    let mut single_step = HumanoidController::default();
+    let single = single_step.update(
+        MovementInput {
+            forward: true,
+            steering: -1.0,
+            ..default()
+        },
+        Duration::from_secs(1),
     );
-    assert!(!update.turning_around);
-    assert_close(controller.heading(), FRAC_PI_2);
+
+    let mut repeated = HumanoidController::default();
+    let repeated_translation = (0..10).fold(Vec3::ZERO, |translation, _| {
+        let update = repeated.update(
+            MovementInput {
+                forward: true,
+                steering: -1.0,
+                ..default()
+            },
+            Duration::from_millis(100),
+        );
+        translation + update.translation
+    });
+
+    let radius = FORWARD_SPEED / STEERING_RATE;
+    assert_close(single.heading, -FRAC_PI_2);
+    assert_close(single.heading, repeated.heading());
+    assert_vec3_close(single.translation, Vec3::new(radius, 0.0, -radius));
+    assert_vec3_close(single.translation, repeated_translation);
+    assert!(!single.turning_around);
+}
+
+#[test]
+fn zero_steering_matches_straight_motion_across_frame_chunking() {
+    let mut single_step = HumanoidController::default();
+    let single = single_step.update(
+        MovementInput {
+            forward: true,
+            ..default()
+        },
+        Duration::from_secs(1),
+    );
+
+    let mut repeated = HumanoidController::default();
+    let repeated_translation = (0..10).fold(Vec3::ZERO, |translation, _| {
+        let update = repeated.update(
+            MovementInput {
+                forward: true,
+                ..default()
+            },
+            Duration::from_millis(100),
+        );
+        translation + update.translation
+    });
+
+    assert_close(single.heading, repeated.heading());
+    assert_vec3_close(single.translation, repeated_translation);
+    assert_vec3_close(single.translation, forward_delta(0.0, FORWARD_SPEED, 1.0));
+    assert!(!single.turning_around);
+}
+
+#[test]
+fn tiny_steering_uses_the_stable_straight_line_fallback() {
+    let start_heading = 0.25;
+    let steering = 5.0e-7;
+
+    assert_eq!(
+        steered_delta(start_heading, steering, FORWARD_SPEED, 1.0),
+        forward_delta(start_heading, FORWARD_SPEED, 1.0)
+    );
 }
 
 #[test]

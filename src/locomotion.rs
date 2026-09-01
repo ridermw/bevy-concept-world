@@ -41,6 +41,10 @@ pub struct MovementUpdate {
     pub turning_around: bool,
 }
 
+/// Angular velocities at or below this magnitude are treated as straight-line
+/// motion so the translation path stays numerically stable near zero steering.
+const STRAIGHT_STEERING_EPSILON: f32 = 1.0e-6;
+
 /// Normalizes an angle into the `[-PI, PI]` range.
 ///
 /// The contract is finite input only; non-finite values are a programmer
@@ -69,12 +73,44 @@ pub fn advance_heading(current: f32, steering: f32, seconds: f32) -> f32 {
 /// Heading zero points along Bevy's negative Z axis.
 pub fn forward_delta(heading: f32, speed: f32, seconds: f32) -> Vec3 {
     assert!(
-        heading.is_finite() && speed.is_finite() && seconds.is_finite() && seconds >= 0.0,
-        "forward_delta requires finite inputs and non-negative seconds"
+        heading.is_finite()
+            && speed.is_finite()
+            && speed >= 0.0
+            && seconds.is_finite()
+            && seconds >= 0.0,
+        "forward_delta requires finite inputs and non-negative speed and seconds"
     );
 
     let distance = speed * seconds;
     Quat::from_rotation_y(heading) * -Vec3::Z * distance
+}
+
+/// Integrates a constant-speed, constant-steering move over one frame.
+///
+/// Heading zero points along Bevy's negative Z axis, and the displacement
+/// follows the same convention as `Quat::from_rotation_y(heading) * -Vec3::Z`.
+pub fn steered_delta(start_heading: f32, steering: f32, speed: f32, seconds: f32) -> Vec3 {
+    assert!(
+        start_heading.is_finite()
+            && steering.is_finite()
+            && speed.is_finite()
+            && speed >= 0.0
+            && seconds.is_finite()
+            && seconds >= 0.0,
+        "steered_delta requires finite inputs and non-negative speed and seconds"
+    );
+
+    let angular_velocity = steering.clamp(-1.0, 1.0) * STEERING_RATE;
+    if angular_velocity.abs() <= STRAIGHT_STEERING_EPSILON {
+        return forward_delta(start_heading, speed, seconds);
+    }
+
+    let end_heading = start_heading + angular_velocity * seconds;
+    Vec3::new(
+        speed * (end_heading.cos() - start_heading.cos()) / angular_velocity,
+        0.0,
+        speed * (start_heading.sin() - end_heading.sin()) / angular_velocity,
+    )
 }
 
 /// The state reported by a turnaround step.
@@ -239,11 +275,13 @@ impl HumanoidController {
             };
         }
 
-        self.heading = advance_heading(self.heading, input.steering, delta.as_secs_f32());
+        let seconds = delta.as_secs_f32();
+        let start_heading = self.heading;
+        self.heading = advance_heading(start_heading, input.steering, seconds);
         MovementUpdate {
             heading: self.heading,
             translation: if input.forward || self.walking_after_turnaround {
-                forward_delta(self.heading, FORWARD_SPEED, delta.as_secs_f32())
+                steered_delta(start_heading, input.steering, FORWARD_SPEED, seconds)
             } else {
                 Vec3::ZERO
             },
