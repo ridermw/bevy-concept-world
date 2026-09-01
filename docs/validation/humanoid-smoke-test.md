@@ -481,3 +481,60 @@ described in the README under
 [*Performance baseline*](../../README.md#performance-baseline). Copy the
 `performance baseline:` line for the debug run and for the release run, and a
 `frame_time` line from well after startup in the release run, into this file.
+
+## Steering and camera controls — automated verification recorded 2026-09-01
+
+The interactive locomotion milestone adds:
+
+- Up Arrow for straight forward travel;
+- Left and Right Arrow for forward travel along smooth, frame-rate-independent
+  steering arcs;
+- Down Arrow for one eased 180-degree turnaround per press, with continued
+  travel while the key remains held;
+- Q and E for camera orbit around the humanoid;
+- mouse-wheel zoom with smooth convergence and 1.5–12 m limits.
+
+The automated quality gate passed from the isolated
+`feature/steering-controls` worktree:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --check` | exit **0**, no diff |
+| `cargo clippy --all-targets -- -D warnings` | exit **0**, no warnings |
+| `cargo test` | exit **0** — **166 tests passed**, 0 failed, 0 ignored |
+| `cargo check --all-targets` | exit **0** |
+| `cargo build --release` | exit **0** |
+| Bounded release capture from session storage | exit **0**, 74,939-byte PNG |
+
+The test total is `tests/app_contract.rs` 26 +
+`tests/config_contract.rs` 48 + `tests/locomotion_contract.rs` 38 +
+`tests/perf_contract.rs` 19 + `tests/runtime_contract.rs` 35. The unit-test
+binaries and doc-test target contribute 0 each.
+
+The release run used the checked-in asset root but a separate working directory
+under session storage, so it could not overwrite the committed hardware-GPU
+evidence image. It reached `Loading` → `Validating` → `Running`, looped
+`Walk_Loop`, wrote and verified a 74,939-byte PNG, and exited successfully.
+
+The locomotion contracts cover straight travel, left/right symmetry, exact
+arc integration across different frame sizes, shallow-steering numerical
+stability, angle wrapping, turnaround continuation and leftover-frame time,
+Running-only transform mutation, camera follow ordering, orbit direction,
+line/pixel wheel conversion, zoom clamping, smooth zoom convergence, and safe
+handling of absent or duplicate camera/character entities.
+
+### Remaining human gate
+
+Automated tests establish deterministic controls and transforms, but not whether
+the motion looks convincing. On a hardware-GPU host, confirm:
+
+1. Left and Right create visually smooth turns with the model facing its travel
+   direction.
+2. Down creates one natural-looking 180-degree reversal and then continues in
+   the opposite direction while held.
+3. Q and E orbit in opposite directions while keeping the humanoid centered.
+4. Mouse-wheel zoom is responsive and respects useful near/far framing.
+5. Space, P, and Escape retain their previous behavior.
+
+This visual steering-feel check is intentionally assigned to the human operator;
+it is not inferred from the software-renderer capture.
