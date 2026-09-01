@@ -63,6 +63,15 @@ small run-to-run float differences even though the rendered geometry was
 unchanged; removing those unused attributes makes the GLB byte-for-byte
 deterministic.
 
+The palette hex values are authored as sRGB colors. The generator converts
+their RGB channels to linear values before assigning both Blender's viewport
+diffuse color and the Principled BSDF `Base Color` input. It also assigns
+`Metallic = 0.0` and `Roughness = 0.9` on that shader. Blender's glTF exporter
+serializes those node inputs as `pbrMetallicRoughness`, so
+`tests/app_contract.rs` checks every expected `Midcreek_*` material against the
+specific linear factor derived from its Cel Shift hex value rather than merely
+checking that the factor is not gray.
+
 Do not overwrite the checked-in GLB while establishing determinism. Generate
 two isolated candidates under the gitignored `.asset-import` directory:
 
@@ -90,8 +99,8 @@ Both hashes and both byte sizes must match before either candidate is copied
 over the checked-in asset. The accepted Blender 5.2.1 LTS output is:
 
 ```text
-SHA-256 2870e6293b8d3af3c4dfa45c8e476f07cf64ec9d6b3569017abc498ef746c79d
-byte size 3,425,968
+SHA-256 9af06f0656a2bb59636c52eb0d73266334a8ee1b27046690d8e9e8f516befc87
+byte size 3,426,232
 ```
 
 After copying the stable candidate to `technician-man.glb`, calculate the lock
@@ -117,7 +126,25 @@ cargo test --test app_contract `
   the_midcreek_technician_walk_loop_sampler_times_start_at_zero -- --exact
 cargo test --test app_contract `
   the_midcreek_technician_glb_contains_the_required_visual_modules_only -- --exact
+cargo test --test app_contract `
+  the_midcreek_technician_glb_preserves_the_cel_shift_material_palette -- --exact
 ```
+
+## Visual acceptance status
+
+The hardware-GPU screenshot added by commit `21b00e9` shows the Midcreek
+technician selected while the runtime is `Running` and both variants are ready
+with their animation players active. The technician geometry is visible, and
+the world markers retain their intended colors, but the entire technician is
+gray. That makes the image useful runtime and static-geometry evidence while
+also exposing a material-export failure: the previous GLB contained the
+correctly named `Midcreek_*` materials, but every generated material exported
+the default gray `baseColorFactor`.
+
+The generator and checked-in GLB now carry the intended palette factors, but no
+new hardware-GPU screenshot has been captured after that correction. Technician
+palette visual acceptance therefore remains failed for the committed image and
+pending a corrected screenshot.
 
 ## Vertical-slice limitations
 
@@ -132,5 +159,7 @@ cargo test --test app_contract `
   only `Walk_Loop`.
 - Materials are flat solid colors with no texture workflow. Unused generated
   UVs are intentionally stripped for deterministic export.
+- The corrected palette is contract-verified in the GLB but still requires a
+  new hardware-GPU screenshot for visual acceptance.
 - Silhouette, equipment recognition, clipping, deformation quality, and loop
-  appearance still require acceptance in a GPU-accelerated live Bevy run.
+  appearance still require final acceptance in a GPU-accelerated live Bevy run.

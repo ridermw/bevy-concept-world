@@ -392,6 +392,22 @@ fn names(document: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn srgb_channel_to_linear(channel: u8) -> f64 {
+    let channel = f64::from(channel) / 255.0;
+    if channel <= 0.04045 {
+        channel / 12.92
+    } else {
+        ((channel + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn assert_close(actual: f64, expected: f64, context: &str) {
+    assert!(
+        (actual - expected).abs() <= 1.0e-6,
+        "{context}: expected {expected}, got {actual}"
+    );
+}
+
 #[test]
 fn the_checked_in_glb_really_declares_the_manifest_scene_and_clip() {
     let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
@@ -539,6 +555,88 @@ fn the_midcreek_technician_glb_contains_the_required_visual_modules_only() {
         !meshes.iter().any(|name| name == "Icosphere"),
         "the source GLB's unreferenced Icosphere must not leak into the technician export"
     );
+}
+
+#[test]
+fn the_midcreek_technician_glb_preserves_the_cel_shift_material_palette() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/characters/midcreek/technician-man/technician-man.glb");
+    let document = glb_json(&fs::read(path).expect("the generated technician GLB must exist"));
+    let expected = [
+        ("Midcreek_skin", [0xC9, 0x8F, 0x6A]),
+        ("Midcreek_hair", [0x2B, 0x23, 0x20]),
+        ("Midcreek_shirt", [0x55, 0x70, 0x7F]),
+        ("Midcreek_denim", [0x4A, 0x64, 0x85]),
+        ("Midcreek_vest", [0xC8, 0xD9, 0x4A]),
+        ("Midcreek_trim", [0xE8, 0x76, 0x3A]),
+        ("Midcreek_silver", [0xD6, 0xDB, 0xE0]),
+        ("Midcreek_hard_hat", [0x2C, 0x6F, 0xB8]),
+        ("Midcreek_boots", [0x3A, 0x31, 0x28]),
+        ("Midcreek_belt", [0x30, 0x2A, 0x25]),
+        ("Midcreek_tools", [0xC6, 0x78, 0x2D]),
+        ("Midcreek_defenders", [0x30, 0x36, 0x3B]),
+        ("Midcreek_eyes", [0x23, 0x28, 0x2D]),
+    ];
+    let materials = document["materials"]
+        .as_array()
+        .expect("the technician GLB must declare materials");
+    let midcreek_materials = materials
+        .iter()
+        .filter(|material| {
+            material["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("Midcreek_"))
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        midcreek_materials.len(),
+        expected.len(),
+        "the GLB must contain exactly the expected named Midcreek materials"
+    );
+
+    for (name, srgb) in expected {
+        let material = midcreek_materials
+            .iter()
+            .find(|material| material["name"] == name)
+            .unwrap_or_else(|| panic!("missing expected technician material {name}"));
+        let pbr = &material["pbrMetallicRoughness"];
+        let factors = pbr["baseColorFactor"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name} must declare a baseColorFactor"));
+        assert_eq!(factors.len(), 4, "{name} must export an RGBA factor");
+
+        for channel in 0..3 {
+            assert_close(
+                factors[channel]
+                    .as_f64()
+                    .unwrap_or_else(|| panic!("{name} channel {channel} must be numeric")),
+                srgb_channel_to_linear(srgb[channel]),
+                &format!("{name} base color channel {channel}"),
+            );
+        }
+        assert_close(
+            factors[3]
+                .as_f64()
+                .unwrap_or_else(|| panic!("{name} alpha must be numeric")),
+            1.0,
+            &format!("{name} alpha"),
+        );
+        assert_close(
+            pbr["metallicFactor"]
+                .as_f64()
+                .unwrap_or_else(|| panic!("{name} must declare metallicFactor")),
+            0.0,
+            &format!("{name} metallic factor"),
+        );
+        assert_close(
+            pbr["roughnessFactor"]
+                .as_f64()
+                .unwrap_or_else(|| panic!("{name} must declare roughnessFactor")),
+            0.9,
+            &format!("{name} roughness factor"),
+        );
+    }
 }
 
 #[test]

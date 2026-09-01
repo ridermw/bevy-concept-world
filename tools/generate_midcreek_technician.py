@@ -42,18 +42,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def rgba(hex_color: str) -> tuple[float, float, float, float]:
+def srgb_channel_to_linear(channel: float) -> float:
+    if channel <= 0.04045:
+        return channel / 12.92
+    return ((channel + 0.055) / 1.055) ** 2.4
+
+
+def linear_rgba(hex_color: str) -> tuple[float, float, float, float]:
     value = hex_color.removeprefix("#")
-    return tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4)) + (
-        1.0,
-    )
+    srgb = tuple(int(value[index : index + 2], 16) / 255 for index in (0, 2, 4))
+    return tuple(srgb_channel_to_linear(channel) for channel in srgb) + (1.0,)
 
 
 def material(name: str, color: str) -> bpy.types.Material:
     result = bpy.data.materials.new(name)
-    result.diffuse_color = rgba(color)
+    color_factor = linear_rgba(color)
+    result.diffuse_color = color_factor
     result.metallic = 0.0
     result.roughness = 0.9
+    result.use_nodes = True
+    principled = next(
+        node for node in result.node_tree.nodes if node.type == "BSDF_PRINCIPLED"
+    )
+    principled.inputs["Base Color"].default_value = color_factor
+    principled.inputs["Metallic"].default_value = 0.0
+    principled.inputs["Roughness"].default_value = 0.9
     return result
 
 

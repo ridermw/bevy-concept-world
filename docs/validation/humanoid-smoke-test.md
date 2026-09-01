@@ -35,7 +35,9 @@
 | Reference visual acceptance — static criteria (upright, scale, facing, deformation) | **PASSED** (hardware-GPU screenshot, 2026-09-01) |
 | Reference visual acceptance — live criteria (gait advancement, loop seam, pause/resume) | **PASSED** (operator observation, 2026-09-01) |
 | Reference steering and camera feel (turns, turnaround, orbit, zoom) | **PASSED** (operator observation, 2026-09-01) |
-| Generated technician visual acceptance — silhouette, equipment, deformation, clipping | **NOT VERIFIED** (needs a hardware-GPU review) |
+| Generated technician runtime and static-geometry evidence | **PASSED WITH LIMITATIONS** (`21b00e9` screenshot reaches `Running`, both variants ready/playing, technician visible) |
+| Generated technician palette acceptance | **FAILED / PENDING CORRECTION EVIDENCE** (`21b00e9` screenshot shows a gray technician; corrected GLB needs a new hardware-GPU screenshot) |
+| Generated technician motion, deformation, and clipping | **NOT VERIFIED** (needs a live hardware-GPU review) |
 | Generated technician model switching and loop seam | **NOT VERIFIED VISUALLY** (runtime contracts and software-adapter startup passed) |
 | Performance baseline: the binary emits every required number | **PASSED** (instrumented) |
 | Performance baseline: the numbers themselves | **NOT MEASURED** (needs a GPU host) |
@@ -89,6 +91,28 @@ without changing their relative normalized phase.
 This correction is established by the checked-in GLB contract tests and
 deterministic Blender regeneration. It does not add GPU-rendered visual
 evidence; the software-renderer capture limitations below remain unchanged.
+
+### Palette-export failure exposed by commit 21b00e9
+
+Commit `21b00e9` replaced the validation image with a hardware-GPU capture of
+the active `Midcreek technician - man`. The overlay is in `Running`, both
+variants report ready with one player each, and both clips report `playing`.
+The technician and world markers render, so the image is useful evidence for
+runtime readiness and the generated model's static geometry.
+
+The technician is uniformly gray while the world markers retain their intended
+colors. Inspection of that GLB found all expected named materials, but each
+generated material had the default gray
+`pbrMetallicRoughness.baseColorFactor = [0.8, 0.8, 0.8, 1]`. The generator had
+assigned only Blender's viewport `diffuse_color`; the glTF exporter reads the
+Principled BSDF node inputs.
+
+The generator and locked GLB are corrected by the technician palette fix, and
+an asset contract now checks every named material against the linear glTF
+factor derived from its Cel Shift sRGB hex color, plus metallic `0.0` and
+roughness `0.9`. No corrected hardware-GPU screenshot was produced during this
+work. The committed `humanoid-walk.png` remains failure evidence for the old
+gray export, so technician palette visual acceptance is still pending.
 
 No B0004 hierarchy warning appeared. The captured overlay showed:
 
@@ -475,13 +499,18 @@ The 3D inspection scene cannot be rendered on this host:
   waited out; the cost tracks the adapter, not the build profile's application
   code.
 
-## Hardware-GPU visual review — passed 2026-09-01
+## Hardware-GPU visual review — reference passed; technician palette failed
 
 The walk and interactive controls were subsequently run on an Apple M4 Pro
-Metal adapter, and a hardware-GPU screenshot was committed as
-[`humanoid-walk.png`](humanoid-walk.png). The operator confirmed all static,
+Metal adapter. The operator confirmed the reference humanoid's static,
 live-animation, locomotion, and camera acceptance criteria described below.
-The run used the following command from the repository root:
+Commit `21b00e9` later replaced [`humanoid-walk.png`](humanoid-walk.png) with a
+technician-active capture. That current image confirms the dual-character
+runtime reached `Running`, both variants were ready and playing, and the
+technician geometry rendered, but its uniform gray appearance fails palette
+acceptance.
+
+The hardware run used the following command from the repository root:
 
 ```powershell
 cd <path-to>\bevy-concept-world
@@ -508,24 +537,28 @@ The overlay in the top-left reached:
 
 ```
 State: Running
-Asset: characters/quaternius/UAL1_Standard.glb
-Scene: Scene   Clip: Walk_Loop
-Animation players: 1 (1 with an animation graph)
+Active model: Midcreek technician - man
+Quaternius reference: ready, players 1/1
+Midcreek technician - man: ready, players 1/1
+Animation players: 2 (2 with an animation graph)
   clip 1.33s  speed 1.00x  playing
-Space: pause/resume   P: screenshot   Esc: exit
+  clip 1.33s  speed 1.00x  playing
 ```
 
-`1 (1 with an animation graph)` and `playing` are both required; `1 (0 with an
-animation graph)` means a player was found but never wired up. This is the same
-state the software-renderer host already reaches.
+`2 (2 with an animation graph)` and both `playing` lines are required; a lower
+graph count means a player was found but never wired up. This is the same
+runtime state the software-renderer host already reaches.
 
 Pressing `P` wrote **`docs/validation/humanoid-walk.png`** inside the checkout;
-that hardware-GPU image is committed.
+the technician-active hardware-GPU image committed by `21b00e9` has SHA-256
+`68dfb2bc577c5b149ce68f697f2f93dc726e2dd5e6f7deff381e40dde141e996`
+and is 2,666,151 bytes. It is retained as evidence of the palette-export
+failure, not as corrected technician color acceptance.
 
 ### What the PNG can prove, and what it cannot
 
-A still frame is evidence for the **static** criteria only. Record these from
-the committed image:
+A still frame is evidence for **static** criteria only. The earlier reference
+review established:
 
 1. the humanoid upright and roughly 1.83 m against the one-meter yellow marker;
 2. the humanoid facing along the cyan `-Z` forward marker, confirming the
@@ -551,10 +584,14 @@ evidence for them:
    to `paused`, and pressing it again resumes from that pose without reloading
    the asset. This is a control behaviour, not an appearance.
 
-The operator explicitly confirmed criteria 5–8 from the live window: the gait
+The operator explicitly confirmed criteria 5–8 for the reference from the live window: the gait
 advanced with alternating feet, repeated loops had no visible seam hitch, the
 in-place root remained stationary when movement input was released, and
 `Space` froze and resumed the animation without reloading the asset.
+
+The current technician image adds useful static geometry and runtime-state
+evidence, but its colors are known to be invalid. A new screenshot of the
+corrected GLB is required before palette acceptance can pass.
 
 ### Also record the performance baseline
 

@@ -36,19 +36,20 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
       capture path was exercised against the release binary and is recorded in
       [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
 - [x] Reference-humanoid visual gate: confirmed on a hardware-GPU host on September 1, 2026.
-      The committed
-      [`humanoid-walk.png`](docs/validation/humanoid-walk.png) shows the upright, correctly
-      scaled humanoid facing the forward marker with intact deformation. The operator also
-      watched the live run and confirmed gait advancement, a clean loop seam, stationary
-      in-place animation, pause/resume, steering, turnaround, orbit, and zoom behavior.
+      The operator reviewed the upright, correctly scaled reference with intact deformation
+      and confirmed gait advancement, a clean loop seam, stationary in-place animation,
+      pause/resume, steering, turnaround, orbit, and zoom behavior. The current committed
+      screenshot was later replaced by `21b00e9` with a technician-active capture.
 - [ ] Performance baseline: startup time, steady-state frame time, entity count, mesh and
       material count, and decoded texture bytes. *(instrumented and ready to read; **not yet
       measured** — see [Performance baseline](#performance-baseline). The binary now logs every
       one of these numbers itself, so the GPU-host run only has to be started and its log
       read)*
-- [ ] Visual gate for the generated technician: confirm silhouette, equipment, rigid-module
-      motion, and clipping in a GPU-accelerated desktop session. The local software adapter
-      reaches `Running` and captures the dual-model overlay, but does not draw the 3D scene.
+- [ ] Visual gate for the generated technician: the hardware-GPU screenshot committed by
+      `21b00e9` confirms `Running`, both variants ready/playing, and visible technician
+      geometry, but the technician is entirely gray while the world markers are colored.
+      The generator and GLB palette are now contract-corrected; palette confirmation,
+      rigid-module motion, deformation, and clipping still require a new hardware-GPU review.
 
 The dual-character runtime is implemented and both asset contracts are verified end to end
 against the real GLBs. Bootstrap validates the complete `CharacterCatalog` before Bevy starts
@@ -62,13 +63,14 @@ manifest transform, world scene, animation graph, and readiness record. Referenc
 visible, the technician starts hidden, and `Tab` changes only `CharacterSelection` and the two
 child `Visibility` values.
 
-The reference humanoid's hardware-GPU visual behavior is also verified. The September 1,
-2026 review confirmed the recorded
+The reference humanoid's hardware-GPU visual behavior is verified. The September 1, 2026
+review confirmed the recorded
 `yaw_degrees` of `180.0`, unit scale, skinned deformation, gait and loop quality, in-place
-root behavior, and the interactive locomotion and camera controls. What is **not** yet
-verified is how the generated technician looks in motion: the software DX12 adapter used by
-this host can capture the overlay but not the 3D render. The evidence and remaining acceptance
-criteria are recorded in
+root behavior, and the interactive locomotion and camera controls. The `21b00e9`
+technician-active screenshot provides useful runtime and static-geometry evidence, but it also
+exposed the gray material export. The corrected GLB has not been captured on hardware yet, and
+the generated technician still needs palette and live-motion acceptance. The evidence and
+remaining criteria are recorded in
 [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
 
 The reference humanoid asset is imported and locked.
@@ -154,8 +156,8 @@ actionable report.
 
 ## Hardware-GPU visual gate
 
-The visual gate was closed on September 1, 2026 using a hardware-GPU desktop session. The
-run was started from the repository root with:
+The reference visual gate was closed on September 1, 2026 using a hardware-GPU desktop
+session. The technician gate remains open. The run was started from the repository root with:
 
 ```powershell
 cd <path-to>\bevy-concept-world
@@ -177,19 +179,19 @@ Tab: switch model   Space: pause/resume
 P: screenshot   Esc: exit
 ```
 
-The committed [`docs/validation/humanoid-walk.png`](docs/validation/humanoid-walk.png)
-provides static evidence for the reference humanoid: upright posture, scale against the
-one-meter marker, facing along the `-Z` marker, intact limbs, and a plausible walk pose. The
-operator separately confirmed its time-based criteria in the live window: advancing gait,
-alternating feet, a clean loop seam, stationary in-place root animation, pause/resume without
-reload, smooth left/right steering, one gradual Down-arrow turnaround, camera orbit in both
-directions, responsive bounded zoom, screenshot capture, and clean exit.
+The operator confirmed the reference humanoid's upright posture, scale, facing, intact
+deformation, advancing gait, alternating feet, clean loop seam, stationary in-place root
+animation, pause/resume, steering, turnaround, orbit, zoom, screenshot capture, and clean exit.
 
-The generated technician still needs the same hardware-GPU review. Press `Tab` twice to
-confirm each model appears instantly without resetting position or normalized animation phase.
-Both `Walk_Loop` clips span the same effective cycle and run at 1.0x. Press `Space` once to
-confirm both clips flip to `paused` and both poses freeze, press it again to confirm they
-resume, then press `Esc` (exit code `0` from `Running`).
+Commit `21b00e9` later replaced
+[`docs/validation/humanoid-walk.png`](docs/validation/humanoid-walk.png) with the
+technician active. The overlay is `Running`, both variants are ready with one player each, both
+clips are playing, and the technician geometry and colored world markers render. The entire
+technician is gray, however, so that image fails palette acceptance. The generated GLB now has
+contract-verified Cel Shift colors, but a corrected hardware-GPU screenshot has not been
+captured. Press `Tab` twice to confirm phase-preserving switching, verify the corrected palette,
+watch rigid-module motion and clipping through several loops, pause/resume both clips, and exit
+from `Running`.
 
 The performance instrumentation remains ready, but its GPU-host measurements have not yet
 been recorded.
@@ -373,8 +375,9 @@ asset root it loads both advertised character directories through
 - re-hashes the GLB and compares SHA-256 and byte size against the lock.
 
 Standalone humanoid animation is now implemented and its asset contract is verified end to
-end against both real GLBs. The reference has been seen in the committed acceptance image; the
-generated technician still awaits GPU-rendered visual confirmation. See
+end against both real GLBs. The reference was accepted in a hardware-GPU review. The committed
+technician screenshot exposed the old gray export, and the corrected palette still awaits a
+new GPU-rendered confirmation. See
 [`docs/superpowers/specs/2026-08-31-humanoid-walk-prototype-design.md`](docs/superpowers/specs/2026-08-31-humanoid-walk-prototype-design.md).
 
 ## Regenerating the Midcreek technician
@@ -390,8 +393,8 @@ The accepted deterministic output is:
 
 ```text
 assets/characters/midcreek/technician-man/technician-man.glb
-SHA-256 2870e6293b8d3af3c4dfa45c8e476f07cf64ec9d6b3569017abc498ef746c79d
-3,425,968 bytes
+SHA-256 9af06f0656a2bb59636c52eb0d73266334a8ee1b27046690d8e9e8f516befc87
+3,426,232 bytes
 ```
 
 ## Re-importing the humanoid asset
