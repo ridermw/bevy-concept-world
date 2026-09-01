@@ -5,7 +5,7 @@
 //! that is kept, so a later cascading symptom can never mask the original
 //! actionable cause.
 
-use bevy::prelude::*;
+use bevy::{app::AppExit, prelude::*};
 
 /// High-level phase of the humanoid prototype.
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
@@ -83,4 +83,18 @@ pub fn fail(
 ) {
     report.record(summary, details);
     next_state.set(PrototypeState::Failed);
+}
+
+/// The process exit code produced by pressing `Escape`.
+///
+/// Leaving a run that is in the terminal [`PrototypeState::Failed`] state must
+/// not report success: an operator or a script that only inspects the exit
+/// code would otherwise read a fatal contract violation as a passing run.
+pub fn escape_exit(state: PrototypeState) -> AppExit {
+    match state {
+        PrototypeState::Failed => AppExit::error(),
+        PrototypeState::Loading | PrototypeState::Validating | PrototypeState::Running => {
+            AppExit::Success
+        }
+    }
 }

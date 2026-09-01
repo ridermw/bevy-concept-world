@@ -71,6 +71,9 @@ pub enum ConfigError {
     #[error("character scale must be positive and finite, got {0}")]
     InvalidScale(f32),
 
+    #[error("character yaw_degrees must be finite, got {0}")]
+    InvalidYaw(f32),
+
     #[error("expected_animation_players must be at least 1, got 0")]
     ZeroAnimationPlayers,
 
@@ -130,8 +133,8 @@ pub enum ConfigError {
 impl CharacterConfig {
     /// Validates every semantic field that RON deserialization cannot
     /// enforce on its own: non-blank identifiers, safe relative paths, a
-    /// positive finite scale, a nonzero expected player count, and
-    /// `root_motion: false`.
+    /// positive finite scale, a finite yaw, a nonzero expected player count,
+    /// and `root_motion: false`.
     fn validate(&self) -> Result<(), ConfigError> {
         check_blank("id", &self.id)?;
         check_blank("source_url", &self.source_url)?;
@@ -145,6 +148,12 @@ impl CharacterConfig {
 
         if !self.scale.is_finite() || self.scale <= 0.0 {
             return Err(ConfigError::InvalidScale(self.scale));
+        }
+        // Any yaw is a legitimate facing correction, including a negative one,
+        // but a non-finite yaw would produce a NaN quaternion and silently
+        // remove the character from every render pass rather than failing.
+        if !self.yaw_degrees.is_finite() {
+            return Err(ConfigError::InvalidYaw(self.yaw_degrees));
         }
         if self.expected_animation_players == 0 {
             return Err(ConfigError::ZeroAnimationPlayers);
