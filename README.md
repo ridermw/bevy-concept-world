@@ -27,6 +27,10 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
       facing the forward marker, and deforming cleanly through the walk loop.
       *(blocked — this host has no GPU; wgpu falls back to a software rasterizer that
       renders no 3D geometry and then times out)*
+- [ ] Performance baseline: startup time, steady-state frame time, entity count, mesh and
+      material count, and decoded texture bytes. *(deferred — see
+      [Performance baseline](#performance-baseline); these numbers are not meaningful until
+      a GPU-backed 3D render succeeds)*
 - [ ] Replace the reference mesh with the first concept-art-derived mesh.
 
 The humanoid runtime is implemented and its asset contract is verified end to end against
@@ -95,6 +99,57 @@ on disk and to be non-empty. Any stale file at that path is deleted before the c
 requested, so a previous run's image can never be mistaken for this one's. A missing file, an
 empty file, a run that never reached `Running`, and any fatal failure all exit nonzero with an
 actionable report.
+
+## Closing the visual gate on a GPU host
+
+Everything except the on-screen check is verified. To close the last gate, clone or copy this
+checkout onto a machine with a GPU-accelerated desktop session and run, **from the repository
+root**:
+
+```powershell
+cd <path-to>\bevy-concept-world
+cargo run --release
+```
+
+Wait for the overlay to read `State: Running`, which should look exactly like this:
+
+```
+State: Running
+Asset: characters/quaternius/UAL1_Standard.glb
+Scene: Scene   Clip: Walk_Loop
+Animation players: 1 (1 with an animation graph)
+  clip 1.33s  speed 1.00x  playing
+Space: pause/resume   P: screenshot   Esc: exit
+```
+
+Then press `P`. That writes `docs/validation/humanoid-walk.png` — relative to the working
+directory, so run it from the repository root — from the fixed inspection camera. Press
+`Space` once to confirm the overlay flips to `paused` and the pose freezes, press it again to
+confirm it resumes, then press `Esc` (exit code `0` from `Running`).
+
+The captured image must show all seven of the criteria listed under
+[*Remaining work to close the visual gate*](docs/validation/humanoid-smoke-test.md#remaining-work-to-close-the-visual-gate).
+Commit the image and record the result there.
+
+## Performance baseline
+
+**Deferred, deliberately not estimated.** The design asks for debug and release startup time,
+steady-state frame time for one humanoid, entity count, mesh and material count, and the sum of
+decoded texture bytes for the humanoid scene.
+
+None of those numbers can be taken on this validation host. wgpu selects the "Microsoft Basic
+Render Driver" software rasterizer here, where the PBR pass produces no geometry, a single
+frame can take seconds, and process teardown took roughly eight minutes of wall clock. Timings
+measured against that adapter would describe the software rasterizer, not the prototype, and
+the asset-derived counts — meshes, materials, decoded texture bytes — cannot be trusted from a
+render path that never draws the mesh. Publishing them would be worse than publishing nothing,
+because they would look like a baseline for future custom meshes.
+
+These measurements are therefore taken in the same GPU-host session that closes the visual
+gate, and recorded in
+[`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md). They are a
+baseline for comparison against future concept-art meshes, not pass/fail targets, so nothing in
+this milestone is blocked on their values — only on their being real.
 
 ## Failure model
 
