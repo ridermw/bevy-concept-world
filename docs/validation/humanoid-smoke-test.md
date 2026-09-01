@@ -269,8 +269,12 @@ overlay-software-renderer name. **The visual gate is not claimed.**
 ## Performance baseline — instrumented, not measured here
 
 The design asks for debug and release startup time, steady-state frame time for
-one humanoid, entity count, mesh and material count, and the sum of decoded
-texture bytes for the humanoid scene.
+one humanoid, entity count, mesh and material count, and decoded texture bytes.
+All counts (entities, meshes, materials, images, and decoded bytes) are
+app-wide totals — they include the inspection scene, UI and font assets, and
+any fallback or placeholder assets Bevy loads alongside the humanoid, not the
+humanoid in isolation. They are useful comparative baselines across builds and
+mesh swaps, not isolated humanoid costs.
 
 **The binary now measures and prints every one of them itself.** `src/perf.rs`
 adds Bevy's `FrameTimeDiagnosticsPlugin` and a `LogDiagnosticsPlugin` filtered

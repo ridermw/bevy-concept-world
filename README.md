@@ -148,10 +148,13 @@ Commit the image and record both the still-frame result and the live observation
 ## Performance baseline
 
 **Instrumented, not yet measured.** The design asks for debug and release startup time,
-steady-state frame time for one humanoid, entity count, mesh and material count, and the sum of
-decoded texture bytes for the humanoid scene. The binary now reports all of them itself, so the
-GPU-host session does not have to instrument anything: it only has to run the binary and read
-the log.
+steady-state frame time for one humanoid, entity count, mesh and material count, and decoded
+texture bytes. All counts (entities, meshes, materials, images, and decoded bytes) are
+app-wide totals — they include the inspection scene, UI and font assets, and any fallback or
+placeholder assets Bevy loads alongside the humanoid, not the humanoid in isolation. They are
+useful comparative baselines across builds and mesh swaps, not isolated humanoid costs. The
+binary now reports all of them itself, so the GPU-host session does not have to instrument
+anything: it only has to run the binary and read the log.
 
 **No values are claimed on this validation host.** wgpu selects the "Microsoft Basic Render
 Driver" software rasterizer here, where the PBR pass produces no geometry. Frame time measured
@@ -163,9 +166,11 @@ than publishing nothing, because they would look like a baseline for future cust
 
 ### Exact commands
 
-Startup timing is *not* separately timed by a stopwatch: the application measures it on
-`Time<Real>` from application startup to the frame that enters `Running`, and prints it. Run
-each profile once, from the repository root.
+Startup timing is *not* separately timed by a stopwatch: `startup_to_running` is measured on
+Bevy's `Time<Real>` from `App` startup to the frame that enters `Running`. This excludes
+everything before `App::run()` — manifest parsing, the 7.6 MB integrity re-hash, and any other
+pre-App bootstrap — and is not a replacement for external wall-clock timing of the full process
+startup. Run each profile once, from the repository root.
 
 Debug:
 
