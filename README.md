@@ -166,10 +166,12 @@ than publishing nothing, because they would look like a baseline for future cust
 
 ### Exact commands
 
-Startup timing is *not* separately timed by a stopwatch: `startup_to_running` is measured on
-Bevy's `Time<Real>` from `App` startup to the frame that enters `Running`. This excludes
-everything before `App::run()` — manifest parsing, the 7.6 MB integrity re-hash, and any other
-pre-App bootstrap — and is not a replacement for external wall-clock timing of the full process
+Startup timing is *not* separately timed by a stopwatch: `startup_to_running` is
+`Time<Real>::elapsed()` sampled when entering `Running`. `Time<Real>` begins at the first app
+update, so this measures asset loading and state progression from that point. It excludes
+pre-App bootstrap (manifest parsing, the 7.6 MB integrity re-hash) and the work `App::run()`
+does before the first frame — plugin finish/cleanup, window creation, and wgpu adapter/device
+initialization — and is not a replacement for external wall-clock timing of the full process
 startup. Run each profile once, from the repository root.
 
 Debug:

@@ -284,6 +284,14 @@ instrumented, timed by hand, or estimated on the GPU host; the exact commands
 and the line-to-number mapping are in the README under
 [*Performance baseline*](../../README.md#performance-baseline).
 
+`startup_to_running` is `Time<Real>::elapsed()` sampled when entering `Running`.
+`Time<Real>` begins at the first app update, so it measures asset loading and
+state progression from that point. It explicitly excludes pre-App bootstrap
+(manifest parsing, integrity re-hash) and the work `App::run()` does before the
+first frame — plugin finish/cleanup, window creation, and wgpu adapter/device
+initialization. External wall-clock timing is needed for the full process
+startup.
+
 **No baseline values are claimed from this host.** wgpu selects the "Microsoft
 Basic Render Driver" software rasterizer here and the PBR pass draws nothing, so:
 

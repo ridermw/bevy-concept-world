@@ -108,9 +108,17 @@ fn format_seconds(duration: Duration) -> String {
 /// The one-time measurement taken when the prototype reaches `Running`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BaselineSnapshot {
-    /// Real time from application startup to entering `Running`. Which build
-    /// profile this describes is the caller's to record; the same line is
-    /// emitted by a debug and a release run.
+    /// [`Time<Real>::elapsed()`] sampled when entering `Running`.
+    ///
+    /// [`Time<Real>`] starts at the first app update, so this measures asset
+    /// loading and state progression from that point. It excludes pre-App
+    /// bootstrap (manifest parsing, integrity re-hash) and the work
+    /// `App::run()` does before the first frame: plugin finish/cleanup, window
+    /// creation, and wgpu adapter/device initialization. External wall-clock
+    /// timing is needed for the full process startup.
+    ///
+    /// Which build profile this describes is the caller's to record; the same
+    /// line is emitted by a debug and a release run.
     pub startup_elapsed: Duration,
     /// Live entities in the main world.
     pub entities: usize,
