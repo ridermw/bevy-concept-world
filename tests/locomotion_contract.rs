@@ -29,6 +29,30 @@ fn assert_close(actual: f32, expected: f32) {
     );
 }
 
+fn assert_chunk_invariant_for_steering(start_heading: f32, steering: f32) {
+    let single_heading = advance_heading(start_heading, steering, 1.0);
+    let single_translation = steered_delta(start_heading, steering, FORWARD_SPEED, 1.0);
+
+    let repeated = (0..60).fold((start_heading, Vec3::ZERO), |(heading, translation), _| {
+        let seconds = 1.0 / 60.0;
+        let update_heading = advance_heading(heading, steering, seconds);
+        let update_translation = steered_delta(heading, steering, FORWARD_SPEED, seconds);
+        (update_heading, translation + update_translation)
+    });
+
+    assert!(
+        (single_heading - repeated.0).abs() <= 2.0e-6,
+        "expected chunk-invariant heading, single={single_heading}, repeated={}",
+        repeated.0
+    );
+    assert!(
+        single_translation.distance(repeated.1) <= 2.0e-6,
+        "expected chunk-invariant translation, single={:?}, repeated={:?}",
+        single_translation,
+        repeated.1
+    );
+}
+
 fn assert_rotation_close(actual: Quat, expected: Quat) {
     assert_vec3_close(actual * Vec3::X, expected * Vec3::X);
     assert_vec3_close(actual * Vec3::Y, expected * Vec3::Y);
@@ -426,14 +450,27 @@ fn zero_steering_matches_straight_motion_across_frame_chunking() {
 }
 
 #[test]
-fn tiny_steering_uses_the_stable_straight_line_fallback() {
+fn tiny_positive_steering_remains_chunk_invariant() {
     let start_heading = 0.25;
-    let steering = 5.0e-7;
+    assert_chunk_invariant_for_steering(start_heading, 1.0e-6);
+}
 
-    assert_eq!(
-        steered_delta(start_heading, steering, FORWARD_SPEED, 1.0),
-        forward_delta(start_heading, FORWARD_SPEED, 1.0)
-    );
+#[test]
+fn tiny_negative_steering_remains_chunk_invariant() {
+    let start_heading = 0.25;
+    assert_chunk_invariant_for_steering(start_heading, -1.0e-6);
+}
+
+#[test]
+fn slightly_larger_positive_steering_remains_chunk_invariant() {
+    let start_heading = 0.25;
+    assert_chunk_invariant_for_steering(start_heading, 1.0e-5);
+}
+
+#[test]
+fn slightly_larger_negative_steering_remains_chunk_invariant() {
+    let start_heading = 0.25;
+    assert_chunk_invariant_for_steering(start_heading, -1.0e-5);
 }
 
 #[test]

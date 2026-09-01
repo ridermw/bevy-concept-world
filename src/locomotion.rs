@@ -41,10 +41,6 @@ pub struct MovementUpdate {
     pub turning_around: bool,
 }
 
-/// Angular velocities at or below this magnitude are treated as straight-line
-/// motion so the translation path stays numerically stable near zero steering.
-const STRAIGHT_STEERING_EPSILON: f32 = 1.0e-6;
-
 /// Normalizes an angle into the `[-PI, PI]` range.
 ///
 /// The contract is finite input only; non-finite values are a programmer
@@ -101,16 +97,15 @@ pub fn steered_delta(start_heading: f32, steering: f32, speed: f32, seconds: f32
     );
 
     let angular_velocity = steering.clamp(-1.0, 1.0) * STEERING_RATE;
-    if angular_velocity.abs() <= STRAIGHT_STEERING_EPSILON {
-        return forward_delta(start_heading, speed, seconds);
-    }
+    let sweep = angular_velocity * seconds;
+    let half_sweep = sweep * 0.5;
+    let sinc = if half_sweep == 0.0 {
+        1.0
+    } else {
+        half_sweep.sin() / half_sweep
+    };
 
-    let end_heading = start_heading + angular_velocity * seconds;
-    Vec3::new(
-        speed * (end_heading.cos() - start_heading.cos()) / angular_velocity,
-        0.0,
-        speed * (start_heading.sin() - end_heading.sin()) / angular_velocity,
-    )
+    forward_delta(start_heading + half_sweep, speed, seconds) * sinc
 }
 
 /// The state reported by a turnaround step.
