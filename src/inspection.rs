@@ -6,12 +6,14 @@
 
 use bevy::{light::CascadeShadowConfigBuilder, prelude::*};
 
+use crate::locomotion::{OrbitCamera, orbit_camera_transform};
+
 /// Where the camera looks: roughly the chest height of a 1.8 m humanoid.
-const LOOK_AT: Vec3 = Vec3::new(0.0, 0.95, 0.0);
-/// Fixed camera position; never changed at runtime.
-const CAMERA_POSITION: Vec3 = Vec3::new(2.6, 1.8, 3.8);
+pub const LOOK_AT: Vec3 = Vec3::new(0.0, 0.95, 0.0);
+/// Fixed inspection-camera position before orbit controls take over.
+pub const CAMERA_POSITION: Vec3 = Vec3::new(2.6, 1.8, 3.8);
 /// Half-extent of the square ground plane, in meters.
-const GROUND_SIZE: f32 = 12.0;
+const GROUND_SIZE: f32 = 100.0;
 /// Thickness of both reference markers, in meters.
 const MARKER_THICKNESS: f32 = 0.05;
 
@@ -41,10 +43,12 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let orbit_camera = OrbitCamera::from_position_and_focus(CAMERA_POSITION, LOOK_AT);
     commands.spawn((
         Name::new("Inspection camera"),
         Camera3d::default(),
-        Transform::from_translation(CAMERA_POSITION).looking_at(LOOK_AT, Vec3::Y),
+        orbit_camera,
+        orbit_camera_transform(Vec3::ZERO, orbit_camera),
     ));
 
     commands.spawn((

@@ -3,14 +3,21 @@ use std::{
     time::Duration,
 };
 
-use bevy::{prelude::*, state::app::StatesPlugin, time::TimeUpdateStrategy};
+use bevy::{
+    input::mouse::{AccumulatedMouseScroll, MouseScrollUnit},
+    prelude::*,
+    state::app::StatesPlugin,
+    time::TimeUpdateStrategy,
+};
 use bevy_concept_world::{
     character::{Humanoid, character_transform},
     config::CharacterConfig,
+    inspection::{CAMERA_POSITION, LOOK_AT},
     locomotion::{
-        FORWARD_SPEED, HumanoidController, LocomotionPlugin, MovementInput, STEERING_RATE,
-        Turnaround, advance_heading, forward_delta, movement_input_from_keys, normalize_angle,
-        steered_delta,
+        CAMERA_MAX_DISTANCE, CAMERA_MIN_DISTANCE, FORWARD_SPEED, HumanoidController,
+        LocomotionPlugin, MovementInput, OrbitCamera, STEERING_RATE, Turnaround, advance_heading,
+        forward_delta, movement_input_from_keys, normalize_angle, orbit_camera_transform,
+        orbit_yaw, smooth_distance, steered_delta, zoom_target,
     },
     state::PrototypeState,
 };
@@ -26,6 +33,13 @@ fn assert_close(actual: f32, expected: f32) {
     assert!(
         (actual - expected).abs() <= 1e-6,
         "expected {expected}, got {actual}"
+    );
+}
+
+fn assert_close_within(actual: f32, expected: f32, tolerance: f32) {
+    assert!(
+        (actual - expected).abs() <= tolerance,
+        "expected {expected} +/- {tolerance}, got {actual}"
     );
 }
 
@@ -123,6 +137,7 @@ fn locomotion_app(initial_state: PrototypeState) -> App {
             250,
         )))
         .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(AccumulatedMouseScroll::default())
         .insert_resource(test_character_config())
         .add_plugins(LocomotionPlugin)
         .insert_state(initial_state);
@@ -246,6 +261,101 @@ fn heading_advance_is_frame_rate_independent() {
     let ten_steps = (0..10).fold(start, |heading, _| advance_heading(heading, steering, 0.1));
 
     assert_close(one_step, ten_steps);
+}
+
+#[test]
+fn orbit_yaw_is_symmetric_and_frame_rate_independent() {
+    let start = 0.35;
+
+    let q_once = orbit_yaw(start, 1.0, 1.0);
+    let e_once = orbit_yaw(start, -1.0, 1.0);
+    let q_steps = (0..10).fold(start, |yaw, _| orbit_yaw(yaw, 1.0, 0.1));
+    let e_steps = (0..10).fold(start, |yaw, _| orbit_yaw(yaw, -1.0, 0.1));
+
+    let q_delta = normalize_angle(q_once - start);
+    let e_delta = normalize_angle(e_once - start);
+
+    assert_close(q_delta, FRAC_PI_2);
+    assert_close(e_delta, -FRAC_PI_2);
+    assert_close(q_delta, -e_delta);
+    assert_close(q_once, q_steps);
+    assert_close(e_once, e_steps);
+}
+
+#[test]
+fn zoom_target_uses_scroll_direction_and_clamps_to_camera_bounds() {
+    assert_close(zoom_target(4.0, 1.0), 3.25);
+    assert_close(zoom_target(4.0, -1.0), 4.75);
+    assert_close(zoom_target(2.0, 10.0), CAMERA_MIN_DISTANCE);
+    assert_close(zoom_target(11.5, -10.0), CAMERA_MAX_DISTANCE);
+}
+
+#[test]
+fn smooth_distance_converges_without_overshoot_and_is_chunk_stable() {
+    let start = CAMERA_MAX_DISTANCE;
+    let target = CAMERA_MIN_DISTANCE;
+    let single = smooth_distance(start, target, 1.0);
+
+    assert!(
+        single < start,
+        "expected {single} to move inward from {start}"
+    );
+    assert!(
+        single > target,
+        "expected {single} to stay above the target {target}"
+    );
+
+    let mut stepped = start;
+    for _ in 0..60 {
+        let next = smooth_distance(stepped, target, 1.0 / 60.0);
+        assert!(next < stepped, "expected {next} to keep moving inward");
+        assert!(
+            next > target,
+            "expected {next} to avoid overshooting the target {target}"
+        );
+        stepped = next;
+    }
+
+    assert_close_within(single, stepped, 2.0e-5);
+
+    let zooming_out = smooth_distance(CAMERA_MIN_DISTANCE, CAMERA_MAX_DISTANCE, 0.25);
+    assert!(zooming_out > CAMERA_MIN_DISTANCE);
+    assert!(zooming_out < CAMERA_MAX_DISTANCE);
+}
+
+#[test]
+fn orbit_camera_transform_translates_with_the_target_and_looks_at_target_height() {
+    let orbit = OrbitCamera::from_position_and_focus(CAMERA_POSITION, LOOK_AT);
+    let origin = orbit_camera_transform(Vec3::ZERO, orbit);
+    let translated_target = Vec3::new(1.25, 0.0, -0.75);
+    let translated = orbit_camera_transform(translated_target, orbit);
+
+    assert_vec3_close(origin.translation, CAMERA_POSITION);
+    assert_rotation_close(
+        origin.rotation,
+        Transform::from_translation(CAMERA_POSITION)
+            .looking_at(LOOK_AT, Vec3::Y)
+            .rotation,
+    );
+    assert_vec3_close(
+        translated.translation - origin.translation,
+        translated_target,
+    );
+
+    let facing_left =
+        Transform::from_translation(translated_target).with_rotation(Quat::from_rotation_y(1.25));
+    let facing_right =
+        Transform::from_translation(translated_target).with_rotation(Quat::from_rotation_y(-0.75));
+    let left_camera = orbit_camera_transform(facing_left.translation, orbit);
+    let right_camera = orbit_camera_transform(facing_right.translation, orbit);
+    assert_vec3_close(left_camera.translation, right_camera.translation);
+    assert_rotation_close(left_camera.rotation, right_camera.rotation);
+
+    let focus = translated_target + Vec3::Y * orbit.target_height;
+    assert_vec3_close(
+        translated.rotation * -Vec3::Z,
+        (focus - translated.translation).normalize(),
+    );
 }
 
 #[test]
@@ -650,7 +760,6 @@ fn transforms_change_only_while_running() {
     assert_eq!(loading_transform, base);
 
     enter(&mut app, PrototypeState::Running);
-    app.update();
 
     let running_transform = app
         .world()
@@ -679,4 +788,118 @@ fn transforms_change_only_while_running() {
         .cloned()
         .expect("unrelated transforms must remain readable");
     assert_eq!(untouched_after, untouched);
+}
+
+#[test]
+fn orbit_camera_updates_only_while_running_and_follows_post_movement_target() {
+    let mut app = locomotion_app(PrototypeState::Loading);
+    let base = character_transform(0.5, 180.0);
+    let humanoid = app
+        .world_mut()
+        .spawn((
+            Humanoid,
+            HumanoidController::default(),
+            base,
+            GlobalTransform::default(),
+        ))
+        .id();
+    let orbit = OrbitCamera::from_position_and_focus(CAMERA_POSITION, LOOK_AT);
+    let initial_camera = orbit_camera_transform(base.translation, orbit);
+    let camera = app
+        .world_mut()
+        .spawn((
+            Camera3d::default(),
+            orbit,
+            initial_camera,
+            GlobalTransform::default(),
+        ))
+        .id();
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ArrowUp);
+
+    app.update();
+
+    let loading_humanoid = app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .cloned()
+        .expect("humanoid root must still have a transform");
+    let loading_camera = app
+        .world()
+        .entity(camera)
+        .get::<Transform>()
+        .cloned()
+        .expect("orbit camera must still have a transform");
+    assert_eq!(loading_humanoid, base);
+    assert_eq!(loading_camera, initial_camera);
+
+    enter(&mut app, PrototypeState::Running);
+    app.update();
+
+    let running_humanoid = app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .cloned()
+        .expect("humanoid root must still have a transform");
+    let running_camera = app
+        .world()
+        .entity(camera)
+        .get::<Transform>()
+        .cloned()
+        .expect("orbit camera must still have a transform");
+    let orbit_state = *app
+        .world()
+        .entity(camera)
+        .get::<OrbitCamera>()
+        .expect("orbit camera state must stay attached");
+
+    let humanoid_delta = running_humanoid.translation - base.translation;
+    let expected_camera = orbit_camera_transform(running_humanoid.translation, orbit_state);
+
+    assert_ne!(running_humanoid.translation, base.translation);
+    assert_vec3_close(
+        running_camera.translation - initial_camera.translation,
+        humanoid_delta,
+    );
+    assert_vec3_close(running_camera.translation, expected_camera.translation);
+    assert_rotation_close(running_camera.rotation, expected_camera.rotation);
+}
+
+#[test]
+fn orbit_camera_converts_pixel_scroll_to_line_zoom() {
+    let mut app = locomotion_app(PrototypeState::Running);
+    let orbit = OrbitCamera::from_position_and_focus(CAMERA_POSITION, LOOK_AT);
+    let _humanoid = app.world_mut().spawn((
+        Humanoid,
+        HumanoidController::default(),
+        character_transform(0.5, 180.0),
+        GlobalTransform::default(),
+    ));
+    let camera = app
+        .world_mut()
+        .spawn((
+            Camera3d::default(),
+            orbit,
+            orbit_camera_transform(Vec3::ZERO, orbit),
+            GlobalTransform::default(),
+        ))
+        .id();
+
+    *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+        unit: MouseScrollUnit::Pixel,
+        delta: Vec2::new(0.0, MouseScrollUnit::SCROLL_UNIT_CONVERSION_FACTOR),
+    };
+
+    app.update();
+
+    let orbit_state = *app
+        .world()
+        .entity(camera)
+        .get::<OrbitCamera>()
+        .expect("orbit camera state must stay attached");
+    assert_close(orbit_state.target_distance, orbit.target_distance - 0.75);
 }

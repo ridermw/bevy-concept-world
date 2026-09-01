@@ -3,7 +3,10 @@ use std::{
     time::Duration,
 };
 
-use bevy::prelude::*;
+use bevy::{
+    input::mouse::{AccumulatedMouseScroll, MouseScrollUnit},
+    prelude::*,
+};
 
 use crate::{
     character::{Humanoid, character_transform},
@@ -16,6 +19,16 @@ pub const FORWARD_SPEED: f32 = 1.5;
 
 /// The maximum heading change rate in radians per second.
 pub const STEERING_RATE: f32 = PI / 2.0;
+/// The minimum allowed orbit-camera distance from the target, in meters.
+pub const CAMERA_MIN_DISTANCE: f32 = 1.5;
+/// The maximum allowed orbit-camera distance from the target, in meters.
+pub const CAMERA_MAX_DISTANCE: f32 = 12.0;
+/// The orbit-camera yaw change rate in radians per second.
+pub const CAMERA_ORBIT_RATE: f32 = PI / 2.0;
+/// The distance change applied for one mouse-wheel line.
+pub const CAMERA_ZOOM_PER_LINE: f32 = 0.75;
+/// The exponential smoothing response applied to camera-distance changes.
+pub const CAMERA_SMOOTHING_RESPONSE: f32 = 10.0;
 
 /// A full turnaround takes exactly three quarters of a second.
 pub const TURNAROUND_DURATION: Duration = Duration::from_millis(750);
@@ -109,6 +122,113 @@ pub fn steered_delta(start_heading: f32, steering: f32, speed: f32, seconds: f32
     };
 
     forward_delta(start_heading + half_sweep, speed, seconds) * sinc
+}
+
+/// Orbit-camera state centered on a moving target.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct OrbitCamera {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub current_distance: f32,
+    pub target_distance: f32,
+    pub target_height: f32,
+}
+
+impl OrbitCamera {
+    /// Derives orbit state from the existing inspection camera geometry.
+    pub fn from_position_and_focus(position: Vec3, focus: Vec3) -> Self {
+        assert!(
+            position.is_finite() && focus.is_finite(),
+            "OrbitCamera::from_position_and_focus requires finite inputs"
+        );
+
+        let offset = position - focus;
+        let distance = offset.length();
+        assert!(
+            distance.is_finite() && distance > 0.0,
+            "OrbitCamera::from_position_and_focus requires a non-zero camera offset"
+        );
+
+        let horizontal = (offset.x * offset.x + offset.z * offset.z).sqrt();
+
+        Self {
+            yaw: normalize_angle(offset.x.atan2(offset.z)),
+            pitch: offset.y.atan2(horizontal),
+            current_distance: distance,
+            target_distance: distance,
+            target_height: focus.y,
+        }
+    }
+}
+
+/// Advances the orbit-camera yaw by the held input over a time span.
+pub fn orbit_yaw(current: f32, orbit_input: f32, seconds: f32) -> f32 {
+    assert!(
+        current.is_finite() && orbit_input.is_finite() && seconds.is_finite() && seconds >= 0.0,
+        "orbit_yaw requires finite inputs and non-negative seconds"
+    );
+
+    let orbit_input = orbit_input.clamp(-1.0, 1.0);
+    normalize_angle(current + orbit_input * CAMERA_ORBIT_RATE * seconds)
+}
+
+/// Applies mouse-wheel zoom to the orbit-camera target distance.
+pub fn zoom_target(current: f32, scroll_lines: f32) -> f32 {
+    assert!(
+        current.is_finite() && scroll_lines.is_finite(),
+        "zoom_target requires finite inputs"
+    );
+
+    (current - scroll_lines * CAMERA_ZOOM_PER_LINE).clamp(CAMERA_MIN_DISTANCE, CAMERA_MAX_DISTANCE)
+}
+
+fn mouse_scroll_lines(scroll: AccumulatedMouseScroll) -> f32 {
+    match scroll.unit {
+        MouseScrollUnit::Line => scroll.delta.y,
+        MouseScrollUnit::Pixel => scroll.delta.y / MouseScrollUnit::SCROLL_UNIT_CONVERSION_FACTOR,
+    }
+}
+
+/// Smoothly advances the current distance toward its target without overshoot.
+pub fn smooth_distance(current: f32, target: f32, seconds: f32) -> f32 {
+    assert!(
+        current.is_finite() && target.is_finite() && seconds.is_finite() && seconds >= 0.0,
+        "smooth_distance requires finite inputs and non-negative seconds"
+    );
+
+    if current.to_bits() == target.to_bits() || seconds == 0.0 {
+        return current;
+    }
+
+    let blend = 1.0 - (-CAMERA_SMOOTHING_RESPONSE * seconds).exp();
+    current + (target - current) * blend
+}
+
+/// Computes the orbit-camera transform around the current target position.
+pub fn orbit_camera_transform(target: Vec3, state: OrbitCamera) -> Transform {
+    assert!(
+        target.is_finite()
+            && state.yaw.is_finite()
+            && state.pitch.is_finite()
+            && state.current_distance.is_finite()
+            && state.target_distance.is_finite()
+            && state.target_height.is_finite(),
+        "orbit_camera_transform requires finite target and orbit state"
+    );
+
+    let focus = target + Vec3::Y * state.target_height;
+    let distance = state
+        .current_distance
+        .clamp(CAMERA_MIN_DISTANCE, CAMERA_MAX_DISTANCE);
+    let horizontal = distance * state.pitch.cos();
+    let position = focus
+        + Vec3::new(
+            horizontal * state.yaw.sin(),
+            distance * state.pitch.sin(),
+            horizontal * state.yaw.cos(),
+        );
+
+    Transform::from_translation(position).looking_at(focus, Vec3::Y)
 }
 
 /// The state reported by a turnaround step.
@@ -305,14 +425,45 @@ pub fn movement_input_from_keys(keys: &ButtonInput<KeyCode>) -> MovementInput {
     }
 }
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum LocomotionSet {
+    MoveHumanoid,
+    UpdateOrbitCamera,
+}
+
+type HumanoidTransformQuery<'w, 's> =
+    Query<'w, 's, &'static Transform, (With<Humanoid>, Without<Camera3d>)>;
+type OrbitCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut OrbitCamera, &'static mut Transform),
+    (With<Camera3d>, Without<Humanoid>),
+>;
+
 /// Applies locomotion to the validated humanoid root while the prototype runs.
 pub struct LocomotionPlugin;
 
 impl Plugin for LocomotionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.configure_sets(
+            Update,
+            (
+                LocomotionSet::MoveHumanoid,
+                LocomotionSet::UpdateOrbitCamera,
+            )
+                .chain(),
+        )
+        .add_systems(
             Update,
             update_humanoid
+                .in_set(LocomotionSet::MoveHumanoid)
+                .run_if(in_state(PrototypeState::Running))
+                .run_if(resource_exists::<CharacterConfig>),
+        )
+        .add_systems(
+            Update,
+            update_orbit_camera
+                .in_set(LocomotionSet::UpdateOrbitCamera)
                 .run_if(in_state(PrototypeState::Running))
                 .run_if(resource_exists::<CharacterConfig>),
         );
@@ -333,4 +484,35 @@ fn update_humanoid(
     transform.rotation = Quat::from_rotation_y(update.heading)
         * character_transform(config.scale, config.yaw_degrees).rotation;
     transform.translation += update.translation;
+}
+
+fn update_orbit_camera(
+    keys: Res<ButtonInput<KeyCode>>,
+    scroll: Option<Res<AccumulatedMouseScroll>>,
+    time: Res<Time>,
+    humanoid: HumanoidTransformQuery,
+    mut camera: OrbitCameraQuery,
+) {
+    let Ok(target) = humanoid.single() else {
+        return;
+    };
+    let Ok((mut orbit, mut transform)) = camera.single_mut() else {
+        return;
+    };
+
+    let orbit_input = match (keys.pressed(KeyCode::KeyQ), keys.pressed(KeyCode::KeyE)) {
+        (true, false) => 1.0,
+        (false, true) => -1.0,
+        (true, true) | (false, false) => 0.0,
+    };
+    let seconds = time.delta_secs();
+
+    orbit.yaw = orbit_yaw(orbit.yaw, orbit_input, seconds);
+    orbit.target_distance = zoom_target(
+        orbit.target_distance,
+        scroll.map_or(0.0, |scroll| mouse_scroll_lines(*scroll)),
+    );
+    orbit.current_distance =
+        smooth_distance(orbit.current_distance, orbit.target_distance, seconds);
+    *transform = orbit_camera_transform(target.translation, *orbit);
 }
