@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use bevy::prelude::Vec3;
+use bevy::prelude::{Quat, Vec3};
 use bevy_concept_world::locomotion::{Turnaround, advance_heading, forward_delta, normalize_angle};
 
 fn assert_vec3_close(actual: Vec3, expected: Vec3) {
@@ -23,6 +23,28 @@ fn assert_close(actual: f32, expected: f32) {
 #[test]
 fn straight_motion_at_heading_zero_moves_along_negative_z() {
     assert_vec3_close(forward_delta(0.0, 1.5, 2.0), Vec3::new(0.0, 0.0, -3.0));
+}
+
+#[test]
+fn forward_motion_matches_bevy_yaw_at_positive_quarter_turn() {
+    let heading = FRAC_PI_2;
+    let distance = 3.0;
+
+    assert_vec3_close(
+        forward_delta(heading, 1.5, 2.0),
+        Quat::from_rotation_y(heading) * -Vec3::Z * distance,
+    );
+}
+
+#[test]
+fn forward_motion_matches_bevy_yaw_at_negative_quarter_turn() {
+    let heading = -FRAC_PI_2;
+    let distance = 3.0;
+
+    assert_vec3_close(
+        forward_delta(heading, 1.5, 2.0),
+        Quat::from_rotation_y(heading) * -Vec3::Z * distance,
+    );
 }
 
 #[test]
@@ -68,6 +90,17 @@ fn a_turnaround_is_incomplete_after_one_half_and_complete_after_the_other_half()
     let second = turnaround.advance(Duration::from_millis(375));
     assert!(second.complete);
     assert_close(second.heading, -FRAC_PI_2);
+}
+
+#[test]
+fn turnarounds_follow_a_consistent_positive_half_turn_near_wrap_boundaries() {
+    for start in [-2.282_367_2, -2.28] {
+        let mut turnaround = Turnaround::new(start);
+        let halfway = turnaround.advance(Duration::from_millis(375));
+
+        assert_close(normalize_angle(halfway.heading - start), FRAC_PI_2);
+        assert!(!halfway.complete);
+    }
 }
 
 #[test]

@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use bevy::prelude::Vec3;
+use bevy::prelude::{Quat, Vec3};
 
 /// The walking speed used by the steering-controls prototype.
 pub const FORWARD_SPEED: f32 = 1.5;
@@ -47,8 +47,7 @@ pub fn forward_delta(heading: f32, speed: f32, seconds: f32) -> Vec3 {
     );
 
     let distance = speed * seconds;
-    let (sin, cos) = heading.sin_cos();
-    Vec3::new(sin * distance, 0.0, -cos * distance)
+    Quat::from_rotation_y(heading) * -Vec3::Z * distance
 }
 
 /// The state reported by a turnaround step.
@@ -62,6 +61,7 @@ pub struct TurnStep {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Turnaround {
     pub start: f32,
+    signed_delta: f32,
     pub elapsed: Duration,
 }
 
@@ -70,12 +70,13 @@ impl Turnaround {
     pub fn new(start: f32) -> Self {
         Self {
             start: normalize_angle(start),
+            signed_delta: PI,
             elapsed: Duration::ZERO,
         }
     }
 
     fn target_heading(&self) -> f32 {
-        normalize_angle(self.start + PI)
+        normalize_angle(self.start + self.signed_delta)
     }
 
     /// Advances the turnaround and reports the current heading.
@@ -92,10 +93,9 @@ impl Turnaround {
 
         let progress = self.elapsed.as_secs_f32() / TURNAROUND_DURATION.as_secs_f32();
         let eased = progress * progress * (3.0 - 2.0 * progress);
-        let heading_delta = normalize_angle(self.target_heading() - self.start);
 
         TurnStep {
-            heading: normalize_angle(self.start + heading_delta * eased),
+            heading: normalize_angle(self.start + self.signed_delta * eased),
             complete: false,
         }
     }
