@@ -11,7 +11,7 @@ use bevy::{
 };
 use bevy_concept_world::{
     character::{Humanoid, character_transform},
-    config::CharacterConfig,
+    config::{CharacterCatalog, CharacterConfig},
     inspection::{CAMERA_POSITION, LOOK_AT},
     locomotion::{
         CAMERA_MAX_DISTANCE, CAMERA_MIN_DISTANCE, FORWARD_SPEED, HumanoidController,
@@ -129,6 +129,19 @@ fn test_character_config() -> CharacterConfig {
     }
 }
 
+fn test_character_catalog() -> CharacterCatalog {
+    let reference = test_character_config();
+    let mut technician_man = reference.clone();
+    technician_man.id = "test-technician".into();
+    technician_man.gltf_path = "characters/midcreek/technician-man/technician-man.glb".into();
+    technician_man.scale = 1.0;
+
+    CharacterCatalog {
+        reference,
+        technician_man,
+    }
+}
+
 fn locomotion_app(initial_state: PrototypeState) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -138,7 +151,7 @@ fn locomotion_app(initial_state: PrototypeState) -> App {
         )))
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(AccumulatedMouseScroll::default())
-        .insert_resource(test_character_config())
+        .insert_resource(test_character_catalog())
         .add_plugins(LocomotionPlugin)
         .insert_state(initial_state);
     app
@@ -149,7 +162,7 @@ fn spawn_humanoid(app: &mut App) -> Entity {
         .spawn((
             Humanoid,
             HumanoidController::default(),
-            character_transform(0.5, 180.0),
+            Transform::IDENTITY,
             GlobalTransform::default(),
         ))
         .id()
@@ -758,7 +771,7 @@ fn turnaround_translation_is_frame_rate_independent_while_down_is_held() {
 #[test]
 fn transforms_change_only_while_running() {
     let mut app = locomotion_app(PrototypeState::Loading);
-    let base = character_transform(0.5, 180.0);
+    let base = Transform::IDENTITY;
     let untouched = Transform::from_xyz(3.0, 2.0, 1.0);
     let humanoid = app
         .world_mut()
@@ -807,7 +820,7 @@ fn transforms_change_only_while_running() {
     assert_eq!(running_transform.scale, base.scale);
     assert_rotation_close(
         running_transform.rotation,
-        Quat::from_rotation_y(controller.heading()) * base.rotation,
+        Quat::from_rotation_y(controller.heading()),
     );
 
     let untouched_after = app
@@ -820,9 +833,81 @@ fn transforms_change_only_while_running() {
 }
 
 #[test]
+fn locomotion_changes_only_the_shared_root() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_plugins(StatesPlugin)
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            250,
+        )))
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(AccumulatedMouseScroll::default())
+        .insert_resource(test_character_catalog())
+        .add_plugins(LocomotionPlugin)
+        .insert_state(PrototypeState::Running);
+
+    let root = app
+        .world_mut()
+        .spawn((
+            Humanoid,
+            HumanoidController::default(),
+            Transform::IDENTITY,
+            GlobalTransform::default(),
+        ))
+        .id();
+    let reference_transform = character_transform(0.5, 180.0);
+    let technician_transform = character_transform(1.0, 180.0);
+    let reference = app
+        .world_mut()
+        .spawn((
+            bevy::ecs::hierarchy::ChildOf(root),
+            reference_transform,
+            GlobalTransform::default(),
+        ))
+        .id();
+    let technician = app
+        .world_mut()
+        .spawn((
+            bevy::ecs::hierarchy::ChildOf(root),
+            technician_transform,
+            GlobalTransform::default(),
+        ))
+        .id();
+
+    app.update();
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ArrowLeft);
+    app.update();
+
+    let root_transform = *app
+        .world()
+        .entity(root)
+        .get::<Transform>()
+        .expect("shared root must retain its transform");
+    assert_ne!(root_transform.translation, Vec3::ZERO);
+    assert_ne!(root_transform.rotation, Quat::IDENTITY);
+    assert_eq!(root_transform.scale, Vec3::ONE);
+    assert_eq!(
+        *app.world()
+            .entity(reference)
+            .get::<Transform>()
+            .expect("reference visual must retain its local transform"),
+        reference_transform
+    );
+    assert_eq!(
+        *app.world()
+            .entity(technician)
+            .get::<Transform>()
+            .expect("technician visual must retain its local transform"),
+        technician_transform
+    );
+}
+
+#[test]
 fn orbit_camera_updates_only_while_running_and_follows_post_movement_target() {
     let mut app = locomotion_app(PrototypeState::Loading);
-    let base = character_transform(0.5, 180.0);
+    let base = Transform::IDENTITY;
     let humanoid = app
         .world_mut()
         .spawn((

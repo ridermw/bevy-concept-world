@@ -26,7 +26,7 @@ use bevy::{
 use thiserror::Error;
 
 use crate::{
-    config::CharacterConfig,
+    config::{CharacterCatalog, CharacterConfig},
     locomotion::HumanoidController,
     state::{FailureReport, PrototypeState, fail},
 };
@@ -213,37 +213,168 @@ pub struct CharacterPlugin;
 #[derive(Component)]
 pub struct Humanoid;
 
-impl Plugin for CharacterPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            OnEnter(PrototypeState::Loading),
-            begin_loading.run_if(resource_exists::<CharacterConfig>),
-        )
-        .add_systems(
-            Update,
-            poll_loading
-                .run_if(in_state(PrototypeState::Loading))
-                .run_if(resource_exists::<CharacterConfig>)
-                .run_if(resource_exists::<CharacterAsset>),
-        )
-        .add_systems(
-            OnEnter(PrototypeState::Validating),
-            spawn_character
-                .run_if(resource_exists::<CharacterConfig>)
-                .run_if(resource_exists::<PreparedCharacter>),
-        )
-        .add_systems(
-            Update,
-            poll_validating
-                .run_if(in_state(PrototypeState::Validating))
-                .run_if(resource_exists::<ValidatingStartedAt>),
-        );
+/// A visual model that can be shown on the shared humanoid root.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CharacterVariant {
+    Reference,
+    TechnicianMan,
+}
+
+impl CharacterVariant {
+    pub const ALL: [Self; 2] = [Self::Reference, Self::TechnicianMan];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Reference => "Quaternius reference",
+            Self::TechnicianMan => "Midcreek technician - man",
+        }
+    }
+
+    pub fn config(self, catalog: &CharacterCatalog) -> &CharacterConfig {
+        match self {
+            Self::Reference => &catalog.reference,
+            Self::TechnicianMan => &catalog.technician_man,
+        }
     }
 }
 
-/// Handle to the root `Gltf` asset. Held so the load is not dropped.
+/// Aggregate load decision for both advertised character variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogLoadOutcome {
+    Waiting,
+    Ready,
+    Failed(CharacterVariant),
+    TimedOut(CharacterVariant),
+}
+
+/// Combines per-variant load outcomes without losing which model failed.
+pub fn evaluate_catalog_load(
+    outcomes: impl IntoIterator<Item = (CharacterVariant, LoadOutcome)>,
+) -> CatalogLoadOutcome {
+    let outcomes: Vec<_> = outcomes.into_iter().collect();
+
+    if let Some((variant, _)) = outcomes
+        .iter()
+        .find(|(_, outcome)| *outcome == LoadOutcome::Failed)
+    {
+        return CatalogLoadOutcome::Failed(*variant);
+    }
+    if let Some((variant, _)) = outcomes
+        .iter()
+        .find(|(_, outcome)| *outcome == LoadOutcome::TimedOut)
+    {
+        return CatalogLoadOutcome::TimedOut(*variant);
+    }
+    if outcomes
+        .iter()
+        .all(|(_, outcome)| *outcome == LoadOutcome::Ready)
+    {
+        CatalogLoadOutcome::Ready
+    } else {
+        CatalogLoadOutcome::Waiting
+    }
+}
+
+/// Player readiness discovered from each spawned visual hierarchy.
+#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+pub struct VariantReadiness {
+    reference_players: Option<usize>,
+    technician_players: Option<usize>,
+}
+
+impl VariantReadiness {
+    pub fn mark_ready(&mut self, variant: CharacterVariant, players: usize) {
+        match variant {
+            CharacterVariant::Reference => self.reference_players = Some(players),
+            CharacterVariant::TechnicianMan => self.technician_players = Some(players),
+        }
+    }
+
+    pub fn players(&self, variant: CharacterVariant) -> Option<usize> {
+        match variant {
+            CharacterVariant::Reference => self.reference_players,
+            CharacterVariant::TechnicianMan => self.technician_players,
+        }
+    }
+
+    pub fn all_ready(&self) -> bool {
+        self.reference_players.is_some() && self.technician_players.is_some()
+    }
+}
+
+/// The currently visible visual model.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharacterSelection {
+    active: CharacterVariant,
+}
+
+impl Default for CharacterSelection {
+    fn default() -> Self {
+        Self {
+            active: CharacterVariant::Reference,
+        }
+    }
+}
+
+impl CharacterSelection {
+    pub fn active(&self) -> CharacterVariant {
+        self.active
+    }
+
+    pub fn toggle(&mut self) {
+        self.active = match self.active {
+            CharacterVariant::Reference => CharacterVariant::TechnicianMan,
+            CharacterVariant::TechnicianMan => CharacterVariant::Reference,
+        };
+    }
+}
+
+impl Plugin for CharacterPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<CharacterSelection>()
+            .init_resource::<VariantReadiness>()
+            .init_resource::<ValidatedVariants>()
+            .add_systems(
+                OnEnter(PrototypeState::Loading),
+                begin_loading.run_if(resource_exists::<CharacterCatalog>),
+            )
+            .add_systems(
+                Update,
+                poll_loading
+                    .run_if(in_state(PrototypeState::Loading))
+                    .run_if(resource_exists::<CharacterCatalog>)
+                    .run_if(resource_exists::<CharacterAssetCatalog>),
+            )
+            .add_systems(
+                OnEnter(PrototypeState::Validating),
+                spawn_character
+                    .run_if(resource_exists::<CharacterCatalog>)
+                    .run_if(resource_exists::<PreparedCharacterCatalog>),
+            )
+            .add_systems(
+                Update,
+                poll_validating
+                    .run_if(in_state(PrototypeState::Validating))
+                    .run_if(resource_exists::<ValidatingStartedAt>),
+            );
+    }
+}
+
+/// Handles to both root `Gltf` assets. Held so neither load is dropped.
 #[derive(Resource, Debug)]
-struct CharacterAsset(Handle<Gltf>);
+pub struct CharacterAssetCatalog {
+    reference: Handle<Gltf>,
+    technician_man: Handle<Gltf>,
+}
+
+impl CharacterAssetCatalog {
+    pub fn handle(&self, variant: CharacterVariant) -> &Handle<Gltf> {
+        match variant {
+            CharacterVariant::Reference => &self.reference,
+            CharacterVariant::TechnicianMan => &self.technician_man,
+        }
+    }
+}
 
 /// Wall-clock instant, on [`Time<Real>`], at which the load was requested.
 #[derive(Resource, Debug)]
@@ -253,13 +384,38 @@ struct LoadingStartedAt(Duration);
 #[derive(Resource, Debug)]
 struct ValidatingStartedAt(Duration);
 
-/// Everything `Loading` proved and prepared, handed to `Validating` so nothing
-/// is spawned in the frame the transition is requested.
-#[derive(Resource, Debug)]
-struct PreparedCharacter {
+/// Prepared scene and animation handles for one visual variant.
+#[derive(Debug, Clone)]
+pub struct PreparedVariant {
     scene: Handle<bevy::world_serialization::WorldAsset>,
     graph: Handle<AnimationGraph>,
     node: AnimationNodeIndex,
+}
+
+impl PreparedVariant {
+    pub fn new(
+        scene: Handle<bevy::world_serialization::WorldAsset>,
+        graph: Handle<AnimationGraph>,
+        node: AnimationNodeIndex,
+    ) -> Self {
+        Self { scene, graph, node }
+    }
+}
+
+/// Prepared handles for every advertised visual variant.
+#[derive(Resource, Debug, Clone)]
+pub struct PreparedCharacterCatalog {
+    reference: PreparedVariant,
+    technician_man: PreparedVariant,
+}
+
+impl PreparedCharacterCatalog {
+    pub fn new(reference: PreparedVariant, technician_man: PreparedVariant) -> Self {
+        Self {
+            reference,
+            technician_man,
+        }
+    }
 }
 
 /// Carried by the spawned scene root until its `AnimationPlayer` entities have
@@ -270,14 +426,60 @@ struct PendingCharacter {
     node: AnimationNodeIndex,
 }
 
-fn begin_loading(
+#[derive(Clone)]
+struct ValidatedVariant {
+    root: Entity,
+    players: Vec<Entity>,
+    graph: Handle<AnimationGraph>,
+    node: AnimationNodeIndex,
+}
+
+#[derive(Resource, Default)]
+struct ValidatedVariants {
+    reference: Option<ValidatedVariant>,
+    technician_man: Option<ValidatedVariant>,
+}
+
+impl ValidatedVariants {
+    fn insert(&mut self, variant: CharacterVariant, validated: ValidatedVariant) {
+        match variant {
+            CharacterVariant::Reference => self.reference = Some(validated),
+            CharacterVariant::TechnicianMan => self.technician_man = Some(validated),
+        }
+    }
+
+    fn both(&self) -> Option<[ValidatedVariant; 2]> {
+        Some([self.reference.clone()?, self.technician_man.clone()?])
+    }
+}
+
+/// Testable notification that one spawned variant hierarchy is ready to
+/// validate. Production forwards Bevy's `WorldInstanceReady` event to this.
+#[derive(EntityEvent, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VariantHierarchyReady {
+    pub entity: Entity,
+}
+
+fn forward_world_instance_ready(ready: On<WorldInstanceReady>, mut commands: Commands) {
+    commands.trigger(VariantHierarchyReady {
+        entity: ready.entity,
+    });
+}
+
+pub fn begin_loading(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    config: Res<CharacterConfig>,
+    catalog: Res<CharacterCatalog>,
     real: Res<Time<Real>>,
 ) {
-    info!("loading character glTF: {}", config.gltf_path);
-    commands.insert_resource(CharacterAsset(asset_server.load(config.gltf_path.clone())));
+    info!(
+        "loading character glTFs: {}, {}",
+        catalog.reference.gltf_path, catalog.technician_man.gltf_path
+    );
+    commands.insert_resource(CharacterAssetCatalog {
+        reference: asset_server.load(catalog.reference.gltf_path.clone()),
+        technician_man: asset_server.load(catalog.technician_man.gltf_path.clone()),
+    });
     commands.insert_resource(LoadingStartedAt(real.elapsed()));
 }
 
@@ -308,12 +510,121 @@ fn recursive_dependency_phase(state: &RecursiveDependencyLoadState) -> (LoadPhas
     }
 }
 
+struct VariantLoadObservation {
+    variant: CharacterVariant,
+    outcome: LoadOutcome,
+    state_details: String,
+    errors: Vec<String>,
+    registered: bool,
+}
+
+fn observe_variant_load(
+    asset_server: &AssetServer,
+    assets: &CharacterAssetCatalog,
+    variant: CharacterVariant,
+    elapsed: Duration,
+) -> VariantLoadObservation {
+    let Some((root, direct, recursive)) = asset_server.get_load_states(assets.handle(variant))
+    else {
+        return VariantLoadObservation {
+            variant,
+            outcome: if timed_out(elapsed, LOADING_TIMEOUT) {
+                LoadOutcome::TimedOut
+            } else {
+                LoadOutcome::Waiting
+            },
+            state_details: "the asset server reports no load state for the requested handle"
+                .to_string(),
+            errors: Vec::new(),
+            registered: false,
+        };
+    };
+
+    let (root_phase, root_error) = root_phase(&root);
+    let (direct_phase, direct_error) = dependency_phase(&direct);
+    let (recursive_phase, recursive_error) = recursive_dependency_phase(&recursive);
+    let mut errors = Vec::new();
+    for (what, error) in [
+        ("root asset", root_error),
+        ("direct dependency", direct_error),
+        ("recursive dependency", recursive_error),
+    ] {
+        if let Some(error) = error {
+            errors.push(format!("{what} loader error: {error}"));
+        }
+    }
+
+    VariantLoadObservation {
+        variant,
+        outcome: evaluate_load(
+            root_phase,
+            direct_phase,
+            recursive_phase,
+            elapsed,
+            LOADING_TIMEOUT,
+        ),
+        state_details: format!(
+            "load states: root={root:?}, dependencies={direct:?}, \
+             recursive dependencies={recursive:?}"
+        ),
+        errors,
+        registered: true,
+    }
+}
+
+fn prepare_variant(
+    variant: CharacterVariant,
+    config: &CharacterConfig,
+    assets: &CharacterAssetCatalog,
+    gltfs: &Assets<Gltf>,
+    graphs: &mut Assets<AnimationGraph>,
+) -> Result<PreparedVariant, (&'static str, Vec<String>)> {
+    let Some(gltf) = gltfs.get(assets.handle(variant)) else {
+        return Err((
+            "Character glTF reported loaded but is absent from Assets<Gltf>",
+            vec![
+                format!("variant: {}", variant.label()),
+                format!("asset path: {}", config.gltf_path),
+            ],
+        ));
+    };
+
+    let mut scenes: Vec<String> = gltf.named_scenes.keys().map(ToString::to_string).collect();
+    scenes.sort();
+    let mut animations: Vec<String> = gltf
+        .named_animations
+        .keys()
+        .map(ToString::to_string)
+        .collect();
+    animations.sort();
+    let discovered = DiscoveredGltf { scenes, animations };
+
+    if let Err(error) =
+        validate_named_assets(&discovered, &config.scene_name, &config.animation_name)
+    {
+        return Err((
+            "Character glTF does not match the manifest",
+            vec![
+                format!("variant: {}", variant.label()),
+                format!("asset path: {}", config.gltf_path),
+                error.to_string(),
+            ],
+        ));
+    }
+
+    let scene = gltf.named_scenes[config.scene_name.as_str()].clone();
+    let clip = gltf.named_animations[config.animation_name.as_str()].clone();
+    let (graph, node) = AnimationGraph::from_clip(clip);
+
+    Ok(PreparedVariant::new(scene, graphs.add(graph), node))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn poll_loading(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    asset: Res<CharacterAsset>,
-    config: Res<CharacterConfig>,
+    assets: Res<CharacterAssetCatalog>,
+    catalog: Res<CharacterCatalog>,
     started_at: Option<Res<LoadingStartedAt>>,
     real: Res<Time<Real>>,
     gltfs: Res<Assets<Gltf>>,
@@ -332,53 +643,30 @@ fn poll_loading(
     let started_at = started_at.map_or(Duration::ZERO, |started| started.0);
     let elapsed = real.elapsed().saturating_sub(started_at);
 
-    // `get_load_states` returns `None` only until the asset server has
-    // registered the handle, which is still legitimate progress.
-    let Some((root, direct, recursive)) = asset_server.get_load_states(&asset.0) else {
-        if timed_out(elapsed, LOADING_TIMEOUT) {
-            *prepared = true;
-            fail(
-                &mut next_state,
-                &mut report,
-                "Character glTF never started loading",
-                vec![
-                    format!("asset path: {}", config.gltf_path),
-                    format!("waited: {:.1}s", elapsed.as_secs_f32()),
-                    "the asset server reports no load state for the requested handle".to_string(),
-                ],
-            );
-        }
-        return;
-    };
+    let observations: Vec<_> = CharacterVariant::ALL
+        .into_iter()
+        .map(|variant| observe_variant_load(&asset_server, &assets, variant, elapsed))
+        .collect();
 
-    let (root_phase, root_error) = root_phase(&root);
-    let (direct_phase, direct_error) = dependency_phase(&direct);
-    let (recursive_phase, recursive_error) = recursive_dependency_phase(&recursive);
-
-    match evaluate_load(
-        root_phase,
-        direct_phase,
-        recursive_phase,
-        elapsed,
-        LOADING_TIMEOUT,
+    match evaluate_catalog_load(
+        observations
+            .iter()
+            .map(|observation| (observation.variant, observation.outcome)),
     ) {
-        LoadOutcome::Waiting => return,
-        LoadOutcome::Failed => {
+        CatalogLoadOutcome::Waiting => return,
+        CatalogLoadOutcome::Failed(variant) => {
             *prepared = true;
-            let mut details = vec![format!("asset path: {}", config.gltf_path)];
-            for (what, error) in [
-                ("root asset", root_error),
-                ("direct dependency", direct_error),
-                ("recursive dependency", recursive_error),
-            ] {
-                if let Some(error) = error {
-                    details.push(format!("{what} loader error: {error}"));
-                }
-            }
-            details.push(format!(
-                "load states: root={root:?}, dependencies={direct:?}, \
-                 recursive dependencies={recursive:?}"
-            ));
+            let observation = observations
+                .iter()
+                .find(|observation| observation.variant == variant)
+                .expect("failed variant came from the observations");
+            let config = variant.config(&catalog);
+            let mut details = vec![
+                format!("variant: {}", variant.label()),
+                format!("asset path: {}", config.gltf_path),
+            ];
+            details.extend(observation.errors.iter().cloned());
+            details.push(observation.state_details.clone());
             fail(
                 &mut next_state,
                 &mut report,
@@ -387,115 +675,127 @@ fn poll_loading(
             );
             return;
         }
-        LoadOutcome::TimedOut => {
+        CatalogLoadOutcome::TimedOut(variant) => {
             *prepared = true;
+            let observation = observations
+                .iter()
+                .find(|observation| observation.variant == variant)
+                .expect("timed-out variant came from the observations");
+            let config = variant.config(&catalog);
+            let summary = if observation.registered {
+                "Character glTF did not finish loading in time"
+            } else {
+                "Character glTF never started loading"
+            };
             fail(
                 &mut next_state,
                 &mut report,
-                "Character glTF did not finish loading in time",
+                summary,
                 vec![
+                    format!("variant: {}", variant.label()),
                     format!("asset path: {}", config.gltf_path),
                     format!(
                         "waited: {:.1}s (limit {:.0}s, real time)",
                         elapsed.as_secs_f32(),
                         LOADING_TIMEOUT.as_secs_f32()
                     ),
-                    format!(
-                        "load states: root={root:?}, dependencies={direct:?}, \
-                         recursive dependencies={recursive:?}"
-                    ),
+                    observation.state_details.clone(),
                 ],
             );
             return;
         }
-        LoadOutcome::Ready => {}
+        CatalogLoadOutcome::Ready => {}
     }
 
-    let Some(gltf) = gltfs.get(&asset.0) else {
-        *prepared = true;
-        fail(
-            &mut next_state,
-            &mut report,
-            "Character glTF reported loaded but is absent from Assets<Gltf>",
-            vec![format!("asset path: {}", config.gltf_path)],
-        );
-        return;
+    let reference = match prepare_variant(
+        CharacterVariant::Reference,
+        &catalog.reference,
+        &assets,
+        &gltfs,
+        &mut graphs,
+    ) {
+        Ok(prepared) => prepared,
+        Err((summary, details)) => {
+            *prepared = true;
+            fail(&mut next_state, &mut report, summary, details);
+            return;
+        }
+    };
+    let technician_man = match prepare_variant(
+        CharacterVariant::TechnicianMan,
+        &catalog.technician_man,
+        &assets,
+        &gltfs,
+        &mut graphs,
+    ) {
+        Ok(prepared) => prepared,
+        Err((summary, details)) => {
+            *prepared = true;
+            fail(&mut next_state, &mut report, summary, details);
+            return;
+        }
     };
 
-    // Sorted so a failure message is stable between runs; the underlying maps
-    // are unordered.
-    let mut scenes: Vec<String> = gltf.named_scenes.keys().map(ToString::to_string).collect();
-    scenes.sort();
-    let mut animations: Vec<String> = gltf
-        .named_animations
-        .keys()
-        .map(ToString::to_string)
-        .collect();
-    animations.sort();
-    let discovered = DiscoveredGltf { scenes, animations };
-
-    if let Err(error) =
-        validate_named_assets(&discovered, &config.scene_name, &config.animation_name)
-    {
-        *prepared = true;
-        fail(
-            &mut next_state,
-            &mut report,
-            "Character glTF does not match the manifest",
-            vec![
-                format!("asset path: {}", config.gltf_path),
-                error.to_string(),
-            ],
-        );
-        return;
-    }
-
-    // Both lookups are guaranteed by the validation immediately above, which
-    // ran against the keys of these exact maps.
-    let scene = gltf.named_scenes[config.scene_name.as_str()].clone();
-    let clip = gltf.named_animations[config.animation_name.as_str()].clone();
-
-    let (graph, node) = AnimationGraph::from_clip(clip);
-    let graph = graphs.add(graph);
-
     *prepared = true;
-    commands.insert_resource(PreparedCharacter { scene, graph, node });
+    commands.insert_resource(PreparedCharacterCatalog::new(reference, technician_man));
 
-    info!(
-        "glTF matches the manifest (scene '{}', clip '{}'); entering Validating",
-        config.scene_name, config.animation_name
-    );
+    info!("both glTFs match their manifests; entering Validating");
     next_state.set(PrototypeState::Validating);
 }
 
 /// Spawns the validated scene. This runs on `OnEnter(Validating)`, one frame
 /// after the transition was requested, so `Validating` is a state the run
 /// really occupies and really logs.
-fn spawn_character(
+pub fn spawn_character(
     mut commands: Commands,
-    config: Res<CharacterConfig>,
-    prepared: Res<PreparedCharacter>,
+    catalog: Res<CharacterCatalog>,
+    prepared: Res<PreparedCharacterCatalog>,
     real: Res<Time<Real>>,
 ) {
     commands.insert_resource(ValidatingStartedAt(real.elapsed()));
-    commands
+    commands.insert_resource(VariantReadiness::default());
+    commands.insert_resource(ValidatedVariants::default());
+    let humanoid = commands
         .spawn((
             Name::new("Humanoid"),
             Humanoid,
             HumanoidController::default(),
-            bevy::world_serialization::WorldAssetRoot(prepared.scene.clone()),
-            character_transform(config.scale, config.yaw_degrees),
-            PendingCharacter {
-                graph: prepared.graph.clone(),
-                node: prepared.node,
-            },
+            Transform::IDENTITY,
         ))
-        .observe(start_animation);
+        .id();
 
-    info!(
-        "spawned scene '{}'; validating the spawned hierarchy",
-        config.scene_name
-    );
+    for (variant, config, prepared, visibility) in [
+        (
+            CharacterVariant::Reference,
+            &catalog.reference,
+            &prepared.reference,
+            Visibility::Inherited,
+        ),
+        (
+            CharacterVariant::TechnicianMan,
+            &catalog.technician_man,
+            &prepared.technician_man,
+            Visibility::Hidden,
+        ),
+    ] {
+        commands
+            .spawn((
+                Name::new(variant.label()),
+                variant,
+                ChildOf(humanoid),
+                bevy::world_serialization::WorldAssetRoot(prepared.scene.clone()),
+                character_transform(config.scale, config.yaw_degrees),
+                visibility,
+                PendingCharacter {
+                    graph: prepared.graph.clone(),
+                    node: prepared.node,
+                },
+            ))
+            .observe(forward_world_instance_ready)
+            .observe(start_animation);
+    }
+
+    info!("spawned both character scenes; validating their hierarchies");
 }
 
 /// Fails the run if the spawned world instance never becomes ready. Without
@@ -503,7 +803,8 @@ fn spawn_character(
 fn poll_validating(
     started_at: Res<ValidatingStartedAt>,
     real: Res<Time<Real>>,
-    config: Res<CharacterConfig>,
+    catalog: Res<CharacterCatalog>,
+    readiness: Res<VariantReadiness>,
     mut next_state: ResMut<NextState<PrototypeState>>,
     mut report: ResMut<FailureReport>,
     mut reported: Local<bool>,
@@ -517,19 +818,28 @@ fn poll_validating(
     }
 
     *reported = true;
+    let mut details = vec![format!(
+        "waited: {:.1}s (limit {:.0}s, real time) with no completed validation",
+        elapsed.as_secs_f32(),
+        VALIDATING_TIMEOUT.as_secs_f32()
+    )];
+    for variant in CharacterVariant::ALL {
+        if readiness.players(variant).is_none() {
+            let config = variant.config(&catalog);
+            details.push(format!(
+                "{} still pending: scene '{}' from {}",
+                variant.label(),
+                config.scene_name,
+                config.gltf_path
+            ));
+        }
+    }
+
     fail(
         &mut next_state,
         &mut report,
-        "Spawned character scene never became ready",
-        vec![
-            format!("scene: {}", config.scene_name),
-            format!("asset path: {}", config.gltf_path),
-            format!(
-                "waited: {:.1}s (limit {:.0}s, real time) with no WorldInstanceReady",
-                elapsed.as_secs_f32(),
-                VALIDATING_TIMEOUT.as_secs_f32()
-            ),
-        ],
+        "Spawned character scenes never both became ready",
+        details,
     );
 }
 
@@ -538,25 +848,27 @@ fn poll_validating(
 /// only system that may request `Running`.
 #[allow(clippy::too_many_arguments)]
 fn start_animation(
-    ready: On<WorldInstanceReady>,
+    ready: On<VariantHierarchyReady>,
     mut commands: Commands,
     children: Query<&Children>,
-    pending: Query<&PendingCharacter>,
+    pending: Query<(&PendingCharacter, &CharacterVariant)>,
     all_players: Query<(), With<AnimationPlayer>>,
     mut players: Query<&mut AnimationPlayer>,
-    config: Res<CharacterConfig>,
+    catalog: Res<CharacterCatalog>,
+    mut readiness: ResMut<VariantReadiness>,
+    mut validated_variants: ResMut<ValidatedVariants>,
     mut next_state: ResMut<NextState<PrototypeState>>,
     mut report: ResMut<FailureReport>,
-    mut handled: Local<bool>,
 ) {
-    if *handled {
-        return;
-    }
     let root = ready.entity;
-    let Ok(pending) = pending.get(root) else {
+    let Ok((pending, variant)) = pending.get(root) else {
         return;
     };
-    *handled = true;
+    let variant = *variant;
+    if readiness.players(variant).is_some() {
+        return;
+    }
+    let config = variant.config(&catalog);
 
     let player_entities = match check_animation_players(
         root,
@@ -571,6 +883,7 @@ fn start_animation(
                 &mut report,
                 "Spawned character scene does not match the manifest",
                 vec![
+                    format!("variant: {}", variant.label()),
                     format!("scene: {}", config.scene_name),
                     format!("asset path: {}", config.gltf_path),
                     error.to_string(),
@@ -580,20 +893,57 @@ fn start_animation(
         }
     };
 
-    for entity in player_entities {
-        let Ok(mut player) = players.get_mut(entity) else {
-            continue;
-        };
-        let mut transitions = AnimationTransitions::new();
-        transitions
-            .play(&mut player, pending.node, Duration::ZERO)
-            .repeat();
-        commands
-            .entity(entity)
-            .insert((AnimationGraphHandle(pending.graph.clone()), transitions));
+    readiness.mark_ready(variant, player_entities.len());
+    validated_variants.insert(
+        variant,
+        ValidatedVariant {
+            root,
+            players: player_entities,
+            graph: pending.graph.clone(),
+            node: pending.node,
+        },
+    );
+
+    if !readiness.all_ready() {
+        info!(
+            "{} hierarchy validated; waiting for the other variant",
+            variant.label()
+        );
+        return;
     }
 
-    commands.entity(root).remove::<PendingCharacter>();
-    info!("looping '{}' on the humanoid", config.animation_name);
+    let Some(validated) = validated_variants.both() else {
+        fail(
+            &mut next_state,
+            &mut report,
+            "Validated character readiness is internally inconsistent",
+            vec!["both variants were marked ready but their player records are incomplete".into()],
+        );
+        return;
+    };
+
+    for validated in validated {
+        for entity in validated.players {
+            let Ok(mut player) = players.get_mut(entity) else {
+                fail(
+                    &mut next_state,
+                    &mut report,
+                    "Validated AnimationPlayer disappeared before startup",
+                    vec![format!("entity: {entity}")],
+                );
+                return;
+            };
+            let mut transitions = AnimationTransitions::new();
+            transitions
+                .play(&mut player, validated.node, Duration::ZERO)
+                .repeat();
+            commands
+                .entity(entity)
+                .insert((AnimationGraphHandle(validated.graph.clone()), transitions));
+        }
+        commands.entity(validated.root).remove::<PendingCharacter>();
+    }
+
+    info!("both character walk loops started in phase");
     next_state.set(PrototypeState::Running);
 }

@@ -8,11 +8,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::{
-    character::{Humanoid, character_transform},
-    config::CharacterConfig,
-    state::PrototypeState,
-};
+use crate::{character::Humanoid, state::PrototypeState};
 
 /// The walking speed used by the steering-controls prototype.
 pub const FORWARD_SPEED: f32 = 1.5;
@@ -462,15 +458,13 @@ impl Plugin for LocomotionPlugin {
             Update,
             update_humanoid
                 .in_set(LocomotionSet::MoveHumanoid)
-                .run_if(in_state(PrototypeState::Running))
-                .run_if(resource_exists::<CharacterConfig>),
+                .run_if(in_state(PrototypeState::Running)),
         )
         .add_systems(
             Update,
             update_orbit_camera
                 .in_set(LocomotionSet::UpdateOrbitCamera)
-                .run_if(in_state(PrototypeState::Running))
-                .run_if(resource_exists::<CharacterConfig>),
+                .run_if(in_state(PrototypeState::Running)),
         );
     }
 }
@@ -478,16 +472,13 @@ impl Plugin for LocomotionPlugin {
 fn update_humanoid(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    config: Res<CharacterConfig>,
     mut humanoid: Query<(&mut HumanoidController, &mut Transform), With<Humanoid>>,
 ) {
     let Ok((mut controller, mut transform)) = humanoid.single_mut() else {
         return;
     };
-
     let update = controller.update(movement_input_from_keys(&keys), time.delta());
-    transform.rotation = Quat::from_rotation_y(update.heading)
-        * character_transform(config.scale, config.yaw_degrees).rotation;
+    transform.rotation = Quat::from_rotation_y(update.heading);
     transform.translation += update.translation;
 }
 

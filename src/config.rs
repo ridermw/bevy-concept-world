@@ -11,10 +11,12 @@ use std::{
 };
 use thiserror::Error;
 
-/// Path to the character manifest, relative to the asset root (`assets/`).
-const CONFIG_PATH: &str = "characters/quaternius/character.ron";
-/// Path to the integrity lock, relative to the asset root (`assets/`).
-const LOCK_PATH: &str = "characters/quaternius/asset.lock.ron";
+/// Directory containing the default character contract, relative to the asset
+/// root (`assets/`).
+const DEFAULT_CHARACTER_DIR: &str = "characters/quaternius";
+const TECHNICIAN_MAN_DIR: &str = "characters/midcreek/technician-man";
+const CONFIG_FILE: &str = "character.ron";
+const LOCK_FILE: &str = "asset.lock.ron";
 
 /// The validated humanoid character manifest, checked in at
 /// `assets/characters/quaternius/character.ron`.
@@ -33,6 +35,13 @@ pub struct CharacterConfig {
     pub scale: f32,
     pub yaw_degrees: f32,
     pub root_motion: bool,
+}
+
+/// The two validated visual variants available to the prototype.
+#[derive(Resource, Debug, Clone)]
+pub struct CharacterCatalog {
+    pub reference: CharacterConfig,
+    pub technician_man: CharacterConfig,
 }
 
 /// The integrity lock recorded alongside the manifest, checked in at
@@ -292,8 +301,29 @@ fn validate_digest(path: &Path, value: &str) -> Result<(), ConfigError> {
 /// well-formed digest, and re-hashes the actual GLB to confirm its byte size
 /// and SHA-256 match the lock. No Bevy asset loading happens here.
 pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, ConfigError> {
-    let config_path = asset_root.join(CONFIG_PATH);
-    let lock_path = asset_root.join(LOCK_PATH);
+    load_character_config_from(asset_root, Path::new(DEFAULT_CHARACTER_DIR))
+}
+
+/// Loads every character that the runtime promises can be selected.
+pub fn load_character_catalog(asset_root: &Path) -> Result<CharacterCatalog, ConfigError> {
+    Ok(CharacterCatalog {
+        reference: load_character_config_from(asset_root, Path::new(DEFAULT_CHARACTER_DIR))?,
+        technician_man: load_character_config_from(asset_root, Path::new(TECHNICIAN_MAN_DIR))?,
+    })
+}
+
+/// Loads a character contract from a directory beneath `asset_root`.
+///
+/// Each character directory carries its own `character.ron`,
+/// `asset.lock.ron`, preserved source/license note, and GLB. This keeps the
+/// original reference mannequin immutable while additional visual variants
+/// reuse the same runtime contract.
+pub fn load_character_config_from(
+    asset_root: &Path,
+    character_dir: &Path,
+) -> Result<CharacterConfig, ConfigError> {
+    let config_path = asset_root.join(character_dir).join(CONFIG_FILE);
+    let lock_path = asset_root.join(character_dir).join(LOCK_FILE);
 
     let config: CharacterConfig = parse_ron(&config_path)?;
     let lock: AssetLock = parse_ron(&lock_path)?;

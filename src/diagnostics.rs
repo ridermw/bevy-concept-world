@@ -23,10 +23,10 @@ use bevy::{
 use thiserror::Error;
 
 use crate::{
-    character::Humanoid,
-    config::CharacterConfig,
+    character::{CharacterSelection, CharacterVariant, Humanoid, VariantReadiness},
+    config::CharacterCatalog,
     locomotion::{HumanoidController, movement_status_line},
-    state::{FailureReport, PrototypeState, escape_exit},
+    state::{FailureReport, PrototypeState, escape_exit, fail},
 };
 
 /// Where `P` and the unattended run write the visual acceptance screenshot,
@@ -187,14 +187,44 @@ impl Plugin for DiagnosticsPlugin {
 #[derive(Component)]
 struct StatusText;
 
-const CONTROL_HELP_LINES: [&str; 2] = [
+const CONTROL_HELP_LINES: [&str; 3] = [
     "Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom",
-    "Space: pause/resume   P: screenshot   Esc: exit",
+    "Tab: switch model   Space: pause/resume",
+    "P: screenshot   Esc: exit",
 ];
 
 /// The concise control help shown in the overlay.
-pub fn control_help_lines() -> [&'static str; 2] {
+pub fn control_help_lines() -> [&'static str; 3] {
     CONTROL_HELP_LINES
+}
+
+/// Catalog-aware model status lines shared by the overlay and headless tests.
+pub fn character_status_lines(
+    catalog: &CharacterCatalog,
+    selection: &CharacterSelection,
+    readiness: &VariantReadiness,
+) -> [String; 3] {
+    let variant_line = |variant: CharacterVariant| {
+        let config = variant.config(catalog);
+        match readiness.players(variant) {
+            Some(players) => format!(
+                "{}: ready, players {players}/{}",
+                variant.label(),
+                config.expected_animation_players
+            ),
+            None => format!(
+                "{}: pending, players 0/{}",
+                variant.label(),
+                config.expected_animation_players
+            ),
+        }
+    };
+
+    [
+        format!("Active model: {}", selection.active().label()),
+        variant_line(CharacterVariant::Reference),
+        variant_line(CharacterVariant::TechnicianMan),
+    ]
 }
 
 /// The actions the controls system should perform this frame.
@@ -204,6 +234,8 @@ pub struct ControlIntents {
     pub exit: Option<AppExit>,
     /// Toggle pause on every animation player.
     pub toggle_pause: bool,
+    /// Toggle between the reference mannequin and Midcreek technician.
+    pub toggle_model: bool,
     /// Request a screenshot from the primary window.
     pub screenshot: bool,
 }
@@ -215,6 +247,7 @@ pub fn control_intents(keys: &ButtonInput<KeyCode>, state: PrototypeState) -> Co
             .just_pressed(KeyCode::Escape)
             .then(|| escape_exit(state)),
         toggle_pause: keys.just_pressed(KeyCode::Space),
+        toggle_model: state == PrototypeState::Running && keys.just_pressed(KeyCode::Tab),
         screenshot: keys.just_pressed(KeyCode::KeyP),
     }
 }
@@ -267,7 +300,9 @@ fn spawn_overlay(mut commands: Commands) {
 #[allow(clippy::too_many_arguments)]
 fn update_overlay(
     state: Res<State<PrototypeState>>,
-    config: Option<Res<CharacterConfig>>,
+    catalog: Option<Res<CharacterCatalog>>,
+    selection: Option<Res<CharacterSelection>>,
+    readiness: Option<Res<VariantReadiness>>,
     report: Res<FailureReport>,
     clips: Res<Assets<AnimationClip>>,
     graphs: Res<Assets<AnimationGraph>>,
@@ -282,15 +317,15 @@ fn update_overlay(
 ) {
     let mut lines = vec![format!("State: {:?}", state.get())];
 
-    match config.as_deref() {
-        Some(config) => {
-            lines.push(format!("Asset: {}", config.gltf_path));
-            lines.push(format!(
-                "Scene: {}   Clip: {}",
-                config.scene_name, config.animation_name
-            ));
+    match (
+        catalog.as_deref(),
+        selection.as_deref(),
+        readiness.as_deref(),
+    ) {
+        (Some(catalog), Some(selection), Some(readiness)) => {
+            lines.extend(character_status_lines(catalog, selection, readiness));
         }
-        None => lines.push("Asset: <manifest unavailable>".to_string()),
+        _ => lines.push("Characters: <catalog or runtime status unavailable>".to_string()),
     }
 
     let total = players.iter().count();
@@ -344,11 +379,16 @@ fn update_overlay(
     }
 }
 
-fn handle_controls(
+/// Applies keyboard intents without respawning or resetting character state.
+pub fn handle_controls(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<PrototypeState>>,
     mut players: Query<&mut AnimationPlayer>,
+    mut selection: ResMut<CharacterSelection>,
+    mut variants: Query<(&CharacterVariant, &mut Visibility)>,
+    mut next_state: ResMut<NextState<PrototypeState>>,
+    mut report: ResMut<FailureReport>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let intents = control_intents(&keys, *state.get());
@@ -364,6 +404,37 @@ fn handle_controls(
             } else {
                 player.pause_all();
             }
+        }
+    }
+
+    if intents.toggle_model {
+        selection.toggle();
+        let active = selection.active();
+        let mut reference_found = false;
+        let mut technician_found = false;
+
+        for (variant, mut visibility) in &mut variants {
+            match variant {
+                CharacterVariant::Reference => reference_found = true,
+                CharacterVariant::TechnicianMan => technician_found = true,
+            }
+            *visibility = if *variant == active {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+        }
+
+        if !reference_found || !technician_found {
+            fail(
+                &mut next_state,
+                &mut report,
+                "Character selection hierarchy is incomplete",
+                vec![
+                    format!("reference visual present: {reference_found}"),
+                    format!("technician visual present: {technician_found}"),
+                ],
+            );
         }
     }
 

@@ -1,0 +1,15 @@
+(
+    id: "midcreek-cel-shift-technician-man",
+    gltf_path: "characters/midcreek/technician-man/technician-man.glb",
+    source_url: "local:midcreek-concept/themes/cel-shift",
+    pack_version: "vertical-slice-1",
+    downloaded_on: "2026-09-01",
+    license: "Original Midcreek concept-derived asset; Quaternius rig and animations CC0-1.0",
+    license_path: "characters/midcreek/technician-man/SOURCE.md",
+    scene_name: "Scene",
+    animation_name: "Walk_Loop",
+    expected_animation_players: 1,
+    scale: 1.0,
+    yaw_degrees: 180.0,
+    root_motion: false,
+)

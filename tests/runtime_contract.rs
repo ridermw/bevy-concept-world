@@ -21,7 +21,8 @@ use bevy::{
 use bevy_concept_world::{
     ASSET_ROOT_ENV, AssetRootError, AssetRootSource,
     character::{
-        LoadOutcome, LoadPhase, SelectionError, check_animation_players, evaluate_load, timed_out,
+        CatalogLoadOutcome, CharacterVariant, LoadOutcome, LoadPhase, SelectionError,
+        VariantReadiness, check_animation_players, evaluate_catalog_load, evaluate_load, timed_out,
     },
     diagnostics::{CAPTURE_ENV, CaptureVerdict, parse_capture_seconds, verify_capture},
     resolve_asset_root_from,
@@ -283,6 +284,53 @@ fn a_deadline_is_reached_only_at_or_after_the_limit() {
     assert!(!timed_out(Duration::from_millis(59_999), TIMEOUT));
     assert!(timed_out(TIMEOUT, TIMEOUT));
     assert!(timed_out(Duration::from_secs(61), TIMEOUT));
+}
+
+#[test]
+fn both_variants_must_be_ready_before_validation_can_begin() {
+    assert_eq!(
+        evaluate_catalog_load([
+            (CharacterVariant::Reference, LoadOutcome::Ready),
+            (CharacterVariant::TechnicianMan, LoadOutcome::Waiting),
+        ]),
+        CatalogLoadOutcome::Waiting
+    );
+}
+
+#[test]
+fn either_variant_failure_blocks_the_catalog() {
+    assert_eq!(
+        evaluate_catalog_load([
+            (CharacterVariant::Reference, LoadOutcome::Ready),
+            (CharacterVariant::TechnicianMan, LoadOutcome::Failed),
+        ]),
+        CatalogLoadOutcome::Failed(CharacterVariant::TechnicianMan)
+    );
+}
+
+#[test]
+fn either_variant_timeout_blocks_the_catalog() {
+    assert_eq!(
+        evaluate_catalog_load([
+            (CharacterVariant::Reference, LoadOutcome::TimedOut),
+            (CharacterVariant::TechnicianMan, LoadOutcome::Ready),
+        ]),
+        CatalogLoadOutcome::TimedOut(CharacterVariant::Reference)
+    );
+}
+
+#[test]
+fn both_spawned_variants_must_validate_before_running() {
+    let mut readiness = VariantReadiness::default();
+
+    readiness.mark_ready(CharacterVariant::Reference, 1);
+    assert!(!readiness.all_ready());
+    assert_eq!(readiness.players(CharacterVariant::Reference), Some(1));
+    assert_eq!(readiness.players(CharacterVariant::TechnicianMan), None);
+
+    readiness.mark_ready(CharacterVariant::TechnicianMan, 1);
+    assert!(readiness.all_ready());
+    assert_eq!(readiness.players(CharacterVariant::TechnicianMan), Some(1));
 }
 
 // --- unattended capture environment ---------------------------------------

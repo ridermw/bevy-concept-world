@@ -10,7 +10,9 @@
 //! `field_reassign_with_default` is silenced for the whole file.
 #![allow(clippy::field_reassign_with_default)]
 
-use bevy_concept_world::config::{ConfigError, load_character_config};
+use bevy_concept_world::config::{
+    ConfigError, load_character_catalog, load_character_config, load_character_config_from,
+};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1027,4 +1029,63 @@ fn validates_the_real_quaternius_contract() {
     assert_eq!(config.scale, 1.0);
     assert_eq!(config.yaw_degrees, 180.0);
     assert!(!config.root_motion);
+}
+
+#[test]
+fn validates_the_real_midcreek_technician_contract() {
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+
+    let config =
+        load_character_config_from(&asset_root, Path::new("characters/midcreek/technician-man"))
+            .expect("the checked-in Midcreek technician contract must be valid");
+
+    assert_eq!(config.id, "midcreek-cel-shift-technician-man");
+    assert_eq!(
+        config.gltf_path,
+        "characters/midcreek/technician-man/technician-man.glb"
+    );
+    assert_eq!(config.scene_name, "Scene");
+    assert_eq!(config.animation_name, "Walk_Loop");
+    assert_eq!(config.expected_animation_players, 1);
+    assert_eq!(config.scale, 1.0);
+    assert_eq!(config.yaw_degrees, 180.0);
+    assert!(!config.root_motion);
+}
+
+#[test]
+fn the_checked_in_character_catalog_contains_reference_and_technician() {
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let catalog =
+        load_character_catalog(&asset_root).expect("both checked-in character contracts must load");
+
+    assert_eq!(
+        catalog.reference.id,
+        "quaternius-universal-animation-library-v3-standard"
+    );
+    assert_eq!(
+        catalog.technician_man.id,
+        "midcreek-cel-shift-technician-man"
+    );
+    assert_ne!(
+        catalog.reference.gltf_path,
+        catalog.technician_man.gltf_path
+    );
+}
+
+#[test]
+fn a_broken_technician_contract_fails_the_complete_catalog() {
+    let root = write_fixture(&Fixture::default());
+    let technician_dir = root.path().join("characters/midcreek/technician-man");
+    fs::create_dir_all(&technician_dir).unwrap();
+    for file in ["asset.lock.ron", "LICENSE.txt", "model.glb"] {
+        fs::copy(asset_dir(&root).join(file), technician_dir.join(file)).unwrap();
+    }
+    let mut technician = Fixture::default();
+    technician.id = "   ".into();
+    fs::write(technician_dir.join("character.ron"), technician.to_ron()).unwrap();
+
+    let error = load_character_catalog(root.path())
+        .expect_err("either advertised contract failing must reject the whole catalog");
+
+    assert!(matches!(error, ConfigError::BlankField { field: "id" }));
 }

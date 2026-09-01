@@ -19,7 +19,7 @@ use std::{path::PathBuf, time::Duration};
 use bevy::{asset::AssetPlugin, prelude::*};
 use bevy_concept_world::{
     AssetRoot, add_runtime_plugins,
-    config::load_character_config,
+    config::load_character_catalog,
     diagnostics::{DiagnosticsPlugin, capture_seconds_from_env},
     resolve_asset_root,
     state::{FailureReport, PrototypeState},
@@ -50,10 +50,10 @@ fn main() -> AppExit {
         ),
     };
 
-    let config = asset_root
+    let catalog = asset_root
         .as_ref()
         .ok()
-        .map(|root| load_character_config(&root.path));
+        .map(|root| load_character_catalog(&root.path));
 
     let mut app = App::new();
     app.add_plugins(
@@ -73,15 +73,15 @@ fn main() -> AppExit {
     );
     add_runtime_plugins(&mut app, diagnostics).init_resource::<FailureReport>();
 
-    let failure = match (&capture, &asset_root, config) {
+    let failure = match (&capture, &asset_root, catalog) {
         (Err(error), _, _) => Some(("Unattended capture request is invalid", error.to_string())),
         (_, Err(error), _) => Some(("Asset root could not be resolved", error.to_string())),
         (_, Ok(_), Some(Err(error))) => Some(("Character contract failed", error.to_string())),
-        (_, Ok(_), Some(Ok(config))) => {
-            app.insert_resource(config);
+        (_, Ok(_), Some(Ok(catalog))) => {
+            app.insert_resource(catalog);
             None
         }
-        // Unreachable: `config` is `None` only when `asset_root` is `Err`,
+        // Unreachable: `catalog` is `None` only when `asset_root` is `Err`,
         // which the arm above already handled.
         (_, Ok(_), None) => Some((
             "Character contract was never attempted",
