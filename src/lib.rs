@@ -5,6 +5,7 @@ pub mod character;
 pub mod config;
 pub mod diagnostics;
 pub mod inspection;
+pub mod locomotion;
 pub mod perf;
 pub mod state;
 
