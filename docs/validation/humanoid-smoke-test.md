@@ -64,6 +64,20 @@ unattended capture verified: docs/validation/humanoid-walk.png (232688 bytes);
   exiting
 ```
 
+The phase-synchronization correction changes that startup line in the current
+build to report the common reference cycle and both applied speeds:
+
+```text
+both character walk loops started at phase zero with a shared 1.3333s cycle
+  (reference 1.0000x, technician 1.0313x)
+```
+
+The technician clip is approximately 1.375 seconds, so running it at
+approximately 1.03125x gives it the same effective cycle duration as the
+approximately 1.33333-second reference clip. Both players still start at seek
+time zero; `Tab` changes only visibility, and `Space` pauses or resumes both
+players without changing their relative normalized phase.
+
 No B0004 hierarchy warning appeared. The captured overlay showed:
 
 ```text

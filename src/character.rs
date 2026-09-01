@@ -238,6 +238,76 @@ impl CharacterVariant {
     }
 }
 
+/// Playback speeds that keep both resident walk loops on the reference clip's
+/// cycle duration.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PhaseSynchronizedPlaybackSpeeds {
+    pub reference: f32,
+    pub technician_man: f32,
+}
+
+/// Why two animation clips cannot be kept at the same normalized gait phase.
+#[derive(Debug, Error, Clone, Copy, PartialEq)]
+pub enum PhaseSyncError {
+    #[error("{} animation duration is unavailable", .variant.label())]
+    MissingDuration { variant: CharacterVariant },
+
+    #[error("{} animation duration must be positive, got {duration}", .variant.label())]
+    NonPositiveDuration {
+        variant: CharacterVariant,
+        duration: f32,
+    },
+
+    #[error("{} animation duration must be finite, got {duration}", .variant.label())]
+    NonFiniteDuration {
+        variant: CharacterVariant,
+        duration: f32,
+    },
+
+    #[error("{} playback speed must be finite, got {speed}", .variant.label())]
+    NonFinitePlaybackSpeed {
+        variant: CharacterVariant,
+        speed: f32,
+    },
+}
+
+/// Uses the reference clip duration as the common cycle duration.
+///
+/// Each speed is `own_duration / reference_duration`, so elapsed wall time
+/// advances both clips through the same normalized phase.
+pub fn phase_synchronized_playback_speeds(
+    reference_duration: Option<f32>,
+    technician_duration: Option<f32>,
+) -> Result<PhaseSynchronizedPlaybackSpeeds, PhaseSyncError> {
+    fn validate(variant: CharacterVariant, duration: Option<f32>) -> Result<f32, PhaseSyncError> {
+        let Some(duration) = duration else {
+            return Err(PhaseSyncError::MissingDuration { variant });
+        };
+        if !duration.is_finite() {
+            return Err(PhaseSyncError::NonFiniteDuration { variant, duration });
+        }
+        if duration <= 0.0 {
+            return Err(PhaseSyncError::NonPositiveDuration { variant, duration });
+        }
+        Ok(duration)
+    }
+
+    let reference = validate(CharacterVariant::Reference, reference_duration)?;
+    let technician = validate(CharacterVariant::TechnicianMan, technician_duration)?;
+    let technician_speed = technician / reference;
+    if !technician_speed.is_finite() {
+        return Err(PhaseSyncError::NonFinitePlaybackSpeed {
+            variant: CharacterVariant::TechnicianMan,
+            speed: technician_speed,
+        });
+    }
+
+    Ok(PhaseSynchronizedPlaybackSpeeds {
+        reference: 1.0,
+        technician_man: technician_speed,
+    })
+}
+
 /// Aggregate load decision for both advertised character variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogLoadOutcome {
@@ -388,6 +458,7 @@ pub struct PreparedVariant {
     scene: Handle<bevy::world_serialization::WorldAsset>,
     graph: Handle<AnimationGraph>,
     node: AnimationNodeIndex,
+    duration: f32,
 }
 
 impl PreparedVariant {
@@ -395,8 +466,14 @@ impl PreparedVariant {
         scene: Handle<bevy::world_serialization::WorldAsset>,
         graph: Handle<AnimationGraph>,
         node: AnimationNodeIndex,
+        duration: f32,
     ) -> Self {
-        Self { scene, graph, node }
+        Self {
+            scene,
+            graph,
+            node,
+            duration,
+        }
     }
 }
 
@@ -422,6 +499,7 @@ impl PreparedCharacterCatalog {
 struct PendingCharacter {
     graph: Handle<AnimationGraph>,
     node: AnimationNodeIndex,
+    duration: f32,
 }
 
 #[derive(Clone)]
@@ -430,6 +508,7 @@ struct ValidatedVariant {
     players: Vec<Entity>,
     graph: Handle<AnimationGraph>,
     node: AnimationNodeIndex,
+    duration: f32,
 }
 
 #[derive(Resource, Default)]
@@ -575,6 +654,7 @@ fn prepare_variant(
     config: &CharacterConfig,
     assets: &CharacterAssetCatalog,
     gltfs: &Assets<Gltf>,
+    clips: &Assets<AnimationClip>,
     graphs: &mut Assets<AnimationGraph>,
 ) -> Result<PreparedVariant, (&'static str, Vec<String>)> {
     let Some(gltf) = gltfs.get(assets.handle(variant)) else {
@@ -612,9 +692,24 @@ fn prepare_variant(
 
     let scene = gltf.named_scenes[config.scene_name.as_str()].clone();
     let clip = gltf.named_animations[config.animation_name.as_str()].clone();
+    let Some(duration) = clips.get(&clip).map(AnimationClip::duration) else {
+        return Err((
+            "Character animation clip is unavailable after its glTF loaded",
+            vec![
+                format!("variant: {}", variant.label()),
+                format!("clip: {}", config.animation_name),
+                format!("asset path: {}", config.gltf_path),
+            ],
+        ));
+    };
     let (graph, node) = AnimationGraph::from_clip(clip);
 
-    Ok(PreparedVariant::new(scene, graphs.add(graph), node))
+    Ok(PreparedVariant::new(
+        scene,
+        graphs.add(graph),
+        node,
+        duration,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -626,6 +721,7 @@ fn poll_loading(
     started_at: Option<Res<LoadingStartedAt>>,
     real: Res<Time<Real>>,
     gltfs: Res<Assets<Gltf>>,
+    clips: Res<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut next_state: ResMut<NextState<PrototypeState>>,
     mut report: ResMut<FailureReport>,
@@ -710,6 +806,7 @@ fn poll_loading(
         &catalog.reference,
         &assets,
         &gltfs,
+        &clips,
         &mut graphs,
     ) {
         Ok(prepared) => prepared,
@@ -724,6 +821,7 @@ fn poll_loading(
         &catalog.technician_man,
         &assets,
         &gltfs,
+        &clips,
         &mut graphs,
     ) {
         Ok(prepared) => prepared,
@@ -788,6 +886,7 @@ pub fn spawn_character(
                 PendingCharacter {
                     graph: prepared.graph.clone(),
                     node: prepared.node,
+                    duration: prepared.duration,
                 },
             ))
             .observe(forward_world_instance_ready)
@@ -913,6 +1012,7 @@ fn start_animation(
             players: player_entities,
             graph: pending.graph.clone(),
             node: pending.node,
+            duration: pending.duration,
         },
     );
 
@@ -934,7 +1034,40 @@ fn start_animation(
         return;
     };
 
-    for validated in validated {
+    let [reference, technician_man] = validated;
+    let common_cycle_duration = reference.duration;
+    let speeds = match phase_synchronized_playback_speeds(
+        Some(common_cycle_duration),
+        Some(technician_man.duration),
+    ) {
+        Ok(speeds) => speeds,
+        Err(error) => {
+            fail(
+                &mut next_state,
+                &mut report,
+                "Character walk loops cannot be phase synchronized",
+                vec![
+                    error.to_string(),
+                    format!(
+                        "{} duration: {}s",
+                        CharacterVariant::Reference.label(),
+                        reference.duration
+                    ),
+                    format!(
+                        "{} duration: {}s",
+                        CharacterVariant::TechnicianMan.label(),
+                        technician_man.duration
+                    ),
+                ],
+            );
+            return;
+        }
+    };
+
+    for (validated, speed) in [
+        (reference, speeds.reference),
+        (technician_man, speeds.technician_man),
+    ] {
         for entity in validated.players {
             let Ok(mut player) = players.get_mut(entity) else {
                 fail(
@@ -948,7 +1081,8 @@ fn start_animation(
             let mut transitions = AnimationTransitions::new();
             transitions
                 .play(&mut player, validated.node, Duration::ZERO)
-                .repeat();
+                .repeat()
+                .set_speed(speed);
             commands
                 .entity(entity)
                 .insert((AnimationGraphHandle(validated.graph.clone()), transitions));
@@ -956,6 +1090,10 @@ fn start_animation(
         commands.entity(validated.root).remove::<PendingCharacter>();
     }
 
-    info!("both character walk loops started in phase");
+    info!(
+        "both character walk loops started at phase zero with a shared {:.4}s cycle \
+         (reference {:.4}x, technician {:.4}x)",
+        common_cycle_duration, speeds.reference, speeds.technician_man
+    );
     next_state.set(PrototypeState::Running);
 }

@@ -25,9 +25,10 @@ use bevy_concept_world::{
     add_runtime_plugins,
     character::{
         CharacterAssetCatalog, CharacterPlugin, CharacterSelection, CharacterVariant,
-        DiscoveredGltf, Humanoid, PreparedCharacterCatalog, PreparedVariant, SelectionError,
-        VariantHierarchyReady, VariantReadiness, begin_loading, character_transform,
-        spawn_character, validate_animation_players, validate_named_assets,
+        DiscoveredGltf, Humanoid, PhaseSyncError, PreparedCharacterCatalog, PreparedVariant,
+        SelectionError, VariantHierarchyReady, VariantReadiness, begin_loading,
+        character_transform, phase_synchronized_playback_speeds, spawn_character,
+        validate_animation_players, validate_named_assets,
     },
     config::load_character_catalog,
     diagnostics::{
@@ -52,6 +53,55 @@ fn pressed(key: KeyCode) -> ButtonInput<KeyCode> {
     let mut keys = ButtonInput::default();
     keys.press(key);
     keys
+}
+
+#[test]
+fn unequal_clip_durations_receive_speeds_for_equal_effective_cycles() {
+    let reference_duration: f32 = 4.0 / 3.0;
+    let technician_duration: f32 = 1.375;
+
+    let speeds =
+        phase_synchronized_playback_speeds(Some(reference_duration), Some(technician_duration))
+            .expect("both real clip durations are valid");
+
+    assert_eq!(speeds.reference, 1.0);
+    assert!(
+        (speeds.technician_man - technician_duration / reference_duration).abs() <= f32::EPSILON
+    );
+    let reference_cycle = reference_duration / speeds.reference;
+    let technician_cycle = technician_duration / speeds.technician_man;
+    assert!((reference_cycle - technician_cycle).abs() <= f32::EPSILON);
+}
+
+#[test]
+fn phase_synchronization_rejects_unusable_clip_durations() {
+    assert!(matches!(
+        phase_synchronized_playback_speeds(None, Some(1.375)),
+        Err(PhaseSyncError::MissingDuration {
+            variant: CharacterVariant::Reference
+        })
+    ));
+    assert!(matches!(
+        phase_synchronized_playback_speeds(Some(4.0 / 3.0), Some(0.0)),
+        Err(PhaseSyncError::NonPositiveDuration {
+            variant: CharacterVariant::TechnicianMan,
+            duration: 0.0
+        })
+    ));
+    assert!(matches!(
+        phase_synchronized_playback_speeds(Some(f32::NAN), Some(1.375)),
+        Err(PhaseSyncError::NonFiniteDuration {
+            variant: CharacterVariant::Reference,
+            ..
+        })
+    ));
+    assert!(matches!(
+        phase_synchronized_playback_speeds(Some(f32::MIN_POSITIVE), Some(f32::MAX)),
+        Err(PhaseSyncError::NonFinitePlaybackSpeed {
+            variant: CharacterVariant::TechnicianMan,
+            ..
+        })
+    ));
 }
 
 // --- exact named-asset matching -------------------------------------------
@@ -654,8 +704,8 @@ fn stable_humanoid_root_owns_both_visual_variants() {
     let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
     let (_, node) = AnimationGraph::from_clip(Handle::default());
     let prepared = PreparedCharacterCatalog::new(
-        PreparedVariant::new(Handle::default(), Handle::default(), node),
-        PreparedVariant::new(Handle::default(), Handle::default(), node),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 1.375),
     );
 
     let mut app = App::new();
@@ -719,8 +769,8 @@ fn stable_humanoid_root_carries_visibility_hierarchy_components() {
     let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
     let (_, node) = AnimationGraph::from_clip(Handle::default());
     let prepared = PreparedCharacterCatalog::new(
-        PreparedVariant::new(Handle::default(), Handle::default(), node),
-        PreparedVariant::new(Handle::default(), Handle::default(), node),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 1.375),
     );
 
     let mut app = App::new();
@@ -779,8 +829,8 @@ fn validating_character_app() -> App {
     let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
     let (_, node) = AnimationGraph::from_clip(Handle::default());
     let prepared = PreparedCharacterCatalog::new(
-        PreparedVariant::new(Handle::default(), Handle::default(), node),
-        PreparedVariant::new(Handle::default(), Handle::default(), node),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 1.375),
     );
 
     let mut app = App::new();
@@ -875,7 +925,7 @@ fn both_players_are_wired_and_started_only_after_both_variants_validate() {
     assert_eq!(readiness.players(CharacterVariant::Reference), Some(1));
     assert_eq!(readiness.players(CharacterVariant::TechnicianMan), Some(1));
 
-    for entity in [reference_player, technician_player] {
+    for (entity, duration) in [(reference_player, 4.0 / 3.0), (technician_player, 1.375)] {
         let entity_ref = app.world().entity(entity);
         assert!(entity_ref.contains::<AnimationGraphHandle>());
         assert!(entity_ref.contains::<AnimationTransitions>());
@@ -886,6 +936,7 @@ fn both_players_are_wired_and_started_only_after_both_variants_validate() {
             .next()
             .expect("both real players must be started");
         assert_eq!(active.1.seek_time(), 0.0);
+        assert!((duration / active.1.speed() - 4.0 / 3.0).abs() <= f32::EPSILON);
     }
 }
 

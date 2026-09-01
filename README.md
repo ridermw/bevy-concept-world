@@ -17,7 +17,7 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
       `bevy-concept-world` loads both locked GLBs, validates the exact `Scene` and `Walk_Loop`
       names against each real file, discovers exactly one `AnimationPlayer` in each spawned
       hierarchy, attaches both animation graphs, and reaches `Running` only after both clips
-      are looping in phase.
+      start at phase zero with playback speeds that keep their normalized gait phase aligned.
       See [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
 - [x] Add the first concept-derived character: the generated Midcreek Cel Shift male
       technician is a deterministic 1.73 m blockout built on the qualified Quaternius
@@ -165,7 +165,7 @@ Quaternius reference: ready, players 1/1
 Midcreek technician - man: ready, players 1/1
 Animation players: 2 (2 with an animation graph)
   clip 1.33s  speed 1.00x  playing
-  clip 1.38s  speed 1.00x  playing
+  clip 1.38s  speed 1.03x  playing
 Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom
 Tab: switch model   Space: pause/resume
 P: screenshot   Esc: exit
@@ -173,9 +173,11 @@ P: screenshot   Esc: exit
 
 Then press `P`. That writes `docs/validation/humanoid-walk.png` — relative to the working
 directory, so run it from the repository root — from the current interactive camera view. Press
-`Tab` twice to confirm each model appears instantly without resetting position or animation
-phase. Press `Space` once to confirm both clips flip to `paused` and both poses freeze, press it
-again to confirm they resume, then press `Esc` (exit code `0` from `Running`).
+`Tab` twice to confirm each model appears instantly without resetting position or normalized
+animation phase. The reference clip defines the common cycle duration; the technician runs
+slightly faster because its authored loop is slightly longer. Press `Space` once to confirm
+both clips flip to `paused` and both poses freeze, press it again to confirm they resume, then
+press `Esc` (exit code `0` from `Running`).
 
 If `ArrowDown` is holding an active turnaround, the overlay also shows `Movement: turning around`
 above the help lines.
