@@ -423,8 +423,8 @@ SHA-256 plus byte size before replacing the checked-in asset.
 Expected and observed for both outputs:
 
 ```text
-sha256 ee9ba685ee57a26fe08fb1b54d6b8d436268f4979713b58226a078a32449fd51
-byte_size 3424928
+sha256 2870e6293b8d3af3c4dfa45c8e476f07cf64ec9d6b3569017abc498ef746c79d
+byte_size 3425968
 ```
 
 - [x] **Step 6: Run the bounded release screenshot smoke**

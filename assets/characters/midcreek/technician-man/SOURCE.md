@@ -50,6 +50,12 @@ The generator writes one output:
 assets/characters/midcreek/technician-man/technician-man.glb
 ```
 
+Blender imports the source `Walk_Loop` action at frames `0..32` but initially
+places its NLA strip at scene frames `1..33`. The generator realigns that strip
+to the action range before export. This preserves the authored 24 fps cycle as
+timestamps `0..1.33333` instead of exporting a one-frame-offset
+`0.0416667..1.375` range.
+
 The visible rest-pose design is 1.73 m from the boot soles at ground level to
 the hard-hat crown. The generator uses solid-color materials and removes the
 generated modules' unused UV layers. Blender's bevel UV interpolation produced
@@ -84,8 +90,8 @@ Both hashes and both byte sizes must match before either candidate is copied
 over the checked-in asset. The accepted Blender 5.2.1 LTS output is:
 
 ```text
-SHA-256 ee9ba685ee57a26fe08fb1b54d6b8d436268f4979713b58226a078a32449fd51
-byte size 3,424,928
+SHA-256 2870e6293b8d3af3c4dfa45c8e476f07cf64ec9d6b3569017abc498ef746c79d
+byte size 3,425,968
 ```
 
 After copying the stable candidate to `technician-man.glb`, calculate the lock
@@ -105,6 +111,10 @@ the loader independently re-hashes the checked-in bytes:
 ```powershell
 cargo test --test config_contract `
   validates_the_real_midcreek_technician_contract -- --exact
+cargo test --test app_contract `
+  the_midcreek_technician_glb_preserves_its_scene_animation_skin_and_player_contract -- --exact
+cargo test --test app_contract `
+  the_midcreek_technician_walk_loop_sampler_times_start_at_zero -- --exact
 cargo test --test app_contract `
   the_midcreek_technician_glb_contains_the_required_visual_modules_only -- --exact
 ```

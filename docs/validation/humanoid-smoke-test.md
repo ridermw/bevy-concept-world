@@ -64,19 +64,27 @@ unattended capture verified: docs/validation/humanoid-walk.png (232688 bytes);
   exiting
 ```
 
-The phase-synchronization correction changes that startup line in the current
-build to report the common reference cycle and both applied speeds:
+The earlier generated technician GLB had a Blender/NLA export offset: its
+`Walk_Loop` sampler inputs spanned `0.0416667..1.375` instead of the source
+action's `0..1.33333`. The regenerated asset realigns the imported strip to
+frames `0..32`. The runtime startup line now reports the shared cycle and
+unmodified speeds:
 
 ```text
 both character walk loops started at phase zero with a shared 1.3333s cycle
-  (reference 1.0000x, technician 1.0313x)
+  (reference 1.0000x, technician 1.0000x)
 ```
 
-The technician clip is approximately 1.375 seconds, so running it at
-approximately 1.03125x gives it the same effective cycle duration as the
-approximately 1.33333-second reference clip. Both players still start at seek
-time zero; `Tab` changes only visibility, and `Space` pauses or resumes both
-players without changing their relative normalized phase.
+Both clips now begin at timestamp zero, end at approximately 1.33333 seconds,
+and run at 1.0x. The existing duration validation remains actionable if a
+future regeneration produces a missing, non-finite, or non-positive duration;
+its phase-synchronization guard remains available for genuinely unequal valid
+clips. `Tab` changes only visibility, and `Space` pauses or resumes both players
+without changing their relative normalized phase.
+
+This correction is established by the checked-in GLB contract tests and
+deterministic Blender regeneration. It does not add GPU-rendered visual
+evidence; the software-renderer capture limitations below remain unchanged.
 
 No B0004 hierarchy warning appeared. The captured overlay showed:
 

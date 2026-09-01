@@ -180,6 +180,27 @@ def make_hidden_contract_mesh(mannequin: bpy.types.Object) -> None:
     mannequin.location.z = -10.0
 
 
+def align_nla_strip_to_action(
+    armature: bpy.types.Object, action_name: str
+) -> None:
+    strips = [
+        strip
+        for track in armature.animation_data.nla_tracks
+        for strip in track.strips
+        if strip.action and strip.action.name == action_name
+    ]
+    if len(strips) != 1:
+        raise RuntimeError(
+            f"expected exactly one NLA strip for {action_name}, found {len(strips)}"
+        )
+
+    strip = strips[0]
+    strip.frame_start = strip.action_frame_start
+    strip.frame_end = strip.frame_start + (
+        strip.action_frame_end - strip.action_frame_start
+    )
+
+
 def build_character(armature: bpy.types.Object) -> None:
     mats = {name: material(f"Midcreek_{name}", color) for name, color in PALETTE.items()}
 
@@ -293,6 +314,7 @@ def main() -> None:
     mannequin = next(obj for obj in bpy.context.scene.objects if obj.type == "MESH")
     armature.name = "MidcreekTechnicianRig"
     make_hidden_contract_mesh(mannequin)
+    align_nla_strip_to_action(armature, "Walk_Loop")
     build_character(armature)
 
     bpy.context.scene.name = "Scene"

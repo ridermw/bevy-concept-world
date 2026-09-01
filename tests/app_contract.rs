@@ -56,9 +56,9 @@ fn pressed(key: KeyCode) -> ButtonInput<KeyCode> {
 }
 
 #[test]
-fn unequal_clip_durations_receive_speeds_for_equal_effective_cycles() {
+fn phase_sync_guard_adjusts_genuinely_unequal_clip_durations() {
     let reference_duration: f32 = 4.0 / 3.0;
-    let technician_duration: f32 = 1.375;
+    let technician_duration: f32 = 2.0;
 
     let speeds =
         phase_synchronized_playback_speeds(Some(reference_duration), Some(technician_duration))
@@ -76,7 +76,7 @@ fn unequal_clip_durations_receive_speeds_for_equal_effective_cycles() {
 #[test]
 fn phase_synchronization_rejects_unusable_clip_durations() {
     assert!(matches!(
-        phase_synchronized_playback_speeds(None, Some(1.375)),
+        phase_synchronized_playback_speeds(None, Some(2.0)),
         Err(PhaseSyncError::MissingDuration {
             variant: CharacterVariant::Reference
         })
@@ -89,7 +89,7 @@ fn phase_synchronization_rejects_unusable_clip_durations() {
         })
     ));
     assert!(matches!(
-        phase_synchronized_playback_speeds(Some(f32::NAN), Some(1.375)),
+        phase_synchronized_playback_speeds(Some(f32::NAN), Some(2.0)),
         Err(PhaseSyncError::NonFiniteDuration {
             variant: CharacterVariant::Reference,
             ..
@@ -310,7 +310,7 @@ fn a_recorded_failure_displays_its_summary_and_every_detail() {
 /// Bevy's loader, meshes, skins, or animation sampling. It exists so the
 /// manifest's `scene_name` and `animation_name` can be checked against the
 /// bytes actually checked in, rather than against fabricated metadata.
-fn glb_json(bytes: &[u8]) -> serde_json::Value {
+fn glb_chunks(bytes: &[u8]) -> (serde_json::Value, &[u8]) {
     assert!(bytes.len() >= 20, "GLB is too short to contain a header");
     assert_eq!(&bytes[0..4], b"glTF", "missing GLB magic");
     assert_eq!(
@@ -324,7 +324,60 @@ fn glb_json(bytes: &[u8]) -> serde_json::Value {
     let end = 20 + chunk_length;
     assert!(end <= bytes.len(), "declared JSON chunk runs past the file");
 
-    serde_json::from_slice(&bytes[20..end]).expect("GLB JSON chunk must be valid JSON")
+    let document =
+        serde_json::from_slice(&bytes[20..end]).expect("GLB JSON chunk must be valid JSON");
+    assert!(
+        end + 8 <= bytes.len(),
+        "GLB is too short to contain a binary chunk header"
+    );
+    let binary_length = u32::from_le_bytes(bytes[end..end + 4].try_into().unwrap()) as usize;
+    assert_eq!(
+        &bytes[end + 4..end + 8],
+        b"BIN\0",
+        "second GLB chunk must be binary"
+    );
+    let binary_end = end + 8 + binary_length;
+    assert!(
+        binary_end <= bytes.len(),
+        "declared binary chunk runs past the file"
+    );
+
+    (document, &bytes[end + 8..binary_end])
+}
+
+fn glb_json(bytes: &[u8]) -> serde_json::Value {
+    glb_chunks(bytes).0
+}
+
+fn scalar_f32_accessor(
+    document: &serde_json::Value,
+    binary: &[u8],
+    accessor_index: usize,
+) -> Vec<f32> {
+    let accessor = &document["accessors"][accessor_index];
+    assert_eq!(accessor["componentType"], 5126, "accessor must contain f32");
+    assert_eq!(accessor["type"], "SCALAR", "accessor must be scalar");
+
+    let buffer_view_index = accessor["bufferView"]
+        .as_u64()
+        .expect("accessor must reference a buffer view") as usize;
+    let buffer_view = &document["bufferViews"][buffer_view_index];
+    let count = accessor["count"]
+        .as_u64()
+        .expect("accessor must declare a count") as usize;
+    let start = buffer_view["byteOffset"].as_u64().unwrap_or(0) as usize
+        + accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
+    let stride = buffer_view["byteStride"].as_u64().unwrap_or(4) as usize;
+
+    (0..count)
+        .map(|index| {
+            let offset = start + index * stride;
+            let bytes: [u8; 4] = binary[offset..offset + 4]
+                .try_into()
+                .expect("f32 accessor value must fit in the binary chunk");
+            f32::from_le_bytes(bytes)
+        })
+        .collect()
 }
 
 fn names(document: &serde_json::Value, key: &str) -> Vec<String> {
@@ -376,6 +429,86 @@ fn the_checked_in_glb_has_one_skin_matching_the_expected_animation_player_count(
         skins, config.expected_animation_players,
         "the manifest expects one animation player per animated skeleton"
     );
+}
+
+#[test]
+fn the_midcreek_technician_glb_preserves_its_scene_animation_skin_and_player_contract() {
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let config = load_character_catalog(&asset_root)
+        .expect("the checked-in catalog must load")
+        .technician_man;
+    let bytes = fs::read(asset_root.join(&config.gltf_path)).expect("the locked GLB must exist");
+    let document = glb_json(&bytes);
+
+    assert_eq!(
+        names(&document, "scenes").as_slice(),
+        std::slice::from_ref(&config.scene_name)
+    );
+    assert_eq!(
+        names(&document, "animations")
+            .iter()
+            .filter(|name| *name == &config.animation_name)
+            .count(),
+        1,
+        "the selected technician animation must retain its exact unique name"
+    );
+
+    let skins = document["skins"]
+        .as_array()
+        .expect("the technician GLB must declare skins");
+    assert_eq!(skins.len(), 1, "the technician GLB must retain one skin");
+    assert_eq!(
+        skins[0]["name"], "MidcreekTechnicianRig",
+        "the technician skin must retain its stable name"
+    );
+
+    let skinned_nodes = document["nodes"]
+        .as_array()
+        .expect("the technician GLB must declare nodes")
+        .iter()
+        .filter(|node| node.get("skin").is_some())
+        .count();
+    assert_eq!(
+        skinned_nodes, config.expected_animation_players,
+        "each skinned hierarchy produces one expected AnimationPlayer"
+    );
+}
+
+#[test]
+fn the_midcreek_technician_walk_loop_sampler_times_start_at_zero() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets/characters/midcreek/technician-man/technician-man.glb");
+    let bytes = fs::read(path).expect("the generated technician GLB must exist");
+    let (document, binary) = glb_chunks(&bytes);
+    let walk = document["animations"]
+        .as_array()
+        .expect("the technician GLB must declare animations")
+        .iter()
+        .find(|animation| animation["name"] == "Walk_Loop")
+        .expect("the technician GLB must declare Walk_Loop");
+
+    let samplers = walk["samplers"]
+        .as_array()
+        .expect("Walk_Loop must declare samplers");
+    assert!(!samplers.is_empty(), "Walk_Loop must have sampler inputs");
+    for (index, sampler) in samplers.iter().enumerate() {
+        let input = sampler["input"]
+            .as_u64()
+            .expect("animation sampler must reference an input accessor")
+            as usize;
+        let timestamps = scalar_f32_accessor(&document, binary, input);
+        let earliest = timestamps.iter().copied().fold(f32::INFINITY, f32::min);
+        let latest = timestamps.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+
+        assert!(
+            earliest.abs() <= 1.0e-6,
+            "Walk_Loop sampler {index} must start at zero, got {earliest}"
+        );
+        assert!(
+            (latest - 4.0 / 3.0).abs() <= 1.0e-5,
+            "Walk_Loop sampler {index} must end at the true 4/3s cycle, got {latest}"
+        );
+    }
 }
 
 #[test]
@@ -705,13 +838,14 @@ fn stable_humanoid_root_owns_both_visual_variants() {
     let (_, node) = AnimationGraph::from_clip(Handle::default());
     let prepared = PreparedCharacterCatalog::new(
         PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
-        PreparedVariant::new(Handle::default(), Handle::default(), node, 1.375),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
     );
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_resource(catalog.clone())
         .insert_resource(prepared)
+        .init_resource::<CharacterSelection>()
         .add_systems(bevy::app::Update, spawn_character);
     app.update();
 
@@ -764,19 +898,56 @@ fn stable_humanoid_root_owns_both_visual_variants() {
 }
 
 #[test]
-fn stable_humanoid_root_carries_visibility_hierarchy_components() {
+fn initial_variant_visibility_follows_character_selection() {
     let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
     let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
     let (_, node) = AnimationGraph::from_clip(Handle::default());
     let prepared = PreparedCharacterCatalog::new(
         PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
-        PreparedVariant::new(Handle::default(), Handle::default(), node, 1.375),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
     );
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
         .insert_resource(catalog)
         .insert_resource(prepared)
+        .init_resource::<CharacterSelection>()
+        .add_systems(bevy::app::Update, spawn_character);
+    app.world_mut()
+        .resource_mut::<CharacterSelection>()
+        .toggle();
+    app.update();
+
+    let world = app.world_mut();
+    let visibility: Vec<_> = world
+        .query::<(&CharacterVariant, &Visibility)>()
+        .iter(world)
+        .map(|(variant, visibility)| (*variant, *visibility))
+        .collect();
+    assert_eq!(
+        visibility,
+        [
+            (CharacterVariant::Reference, Visibility::Hidden),
+            (CharacterVariant::TechnicianMan, Visibility::Inherited),
+        ]
+    );
+}
+
+#[test]
+fn stable_humanoid_root_carries_visibility_hierarchy_components() {
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
+    let (_, node) = AnimationGraph::from_clip(Handle::default());
+    let prepared = PreparedCharacterCatalog::new(
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
+    );
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(catalog)
+        .insert_resource(prepared)
+        .init_resource::<CharacterSelection>()
         .add_systems(bevy::app::Update, spawn_character);
     app.update();
 
@@ -830,7 +1001,7 @@ fn validating_character_app() -> App {
     let (_, node) = AnimationGraph::from_clip(Handle::default());
     let prepared = PreparedCharacterCatalog::new(
         PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
-        PreparedVariant::new(Handle::default(), Handle::default(), node, 1.375),
+        PreparedVariant::new(Handle::default(), Handle::default(), node, 4.0 / 3.0),
     );
 
     let mut app = App::new();
@@ -838,6 +1009,7 @@ fn validating_character_app() -> App {
         .add_plugins(StatesPlugin)
         .insert_resource(catalog)
         .insert_resource(prepared)
+        .init_resource::<CharacterSelection>()
         .init_resource::<FailureReport>()
         .insert_state(PrototypeState::Validating);
     app.world_mut()
@@ -925,7 +1097,7 @@ fn both_players_are_wired_and_started_only_after_both_variants_validate() {
     assert_eq!(readiness.players(CharacterVariant::Reference), Some(1));
     assert_eq!(readiness.players(CharacterVariant::TechnicianMan), Some(1));
 
-    for (entity, duration) in [(reference_player, 4.0 / 3.0), (technician_player, 1.375)] {
+    for entity in [reference_player, technician_player] {
         let entity_ref = app.world().entity(entity);
         assert!(entity_ref.contains::<AnimationGraphHandle>());
         assert!(entity_ref.contains::<AnimationTransitions>());
@@ -936,7 +1108,7 @@ fn both_players_are_wired_and_started_only_after_both_variants_validate() {
             .next()
             .expect("both real players must be started");
         assert_eq!(active.1.seek_time(), 0.0);
-        assert!((duration / active.1.speed() - 4.0 / 3.0).abs() <= f32::EPSILON);
+        assert_eq!(active.1.speed(), 1.0);
     }
 }
 

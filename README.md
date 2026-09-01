@@ -17,7 +17,9 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
       `bevy-concept-world` loads both locked GLBs, validates the exact `Scene` and `Walk_Loop`
       names against each real file, discovers exactly one `AnimationPlayer` in each spawned
       hierarchy, attaches both animation graphs, and reaches `Running` only after both clips
-      start at phase zero with playback speeds that keep their normalized gait phase aligned.
+      start at phase zero. Both exported clips use the same approximately 1.33333-second cycle,
+      so both players run at 1.0x while the duration guard keeps their normalized gait phase
+      aligned.
       See [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
 - [x] Add the first concept-derived character: the generated Midcreek Cel Shift male
       technician is a deterministic 1.73 m blockout built on the qualified Quaternius
@@ -165,7 +167,7 @@ Quaternius reference: ready, players 1/1
 Midcreek technician - man: ready, players 1/1
 Animation players: 2 (2 with an animation graph)
   clip 1.33s  speed 1.00x  playing
-  clip 1.38s  speed 1.03x  playing
+clip 1.33s  speed 1.00x  playing
 Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom
 Tab: switch model   Space: pause/resume
 P: screenshot   Esc: exit
@@ -174,10 +176,9 @@ P: screenshot   Esc: exit
 Then press `P`. That writes `docs/validation/humanoid-walk.png` — relative to the working
 directory, so run it from the repository root — from the current interactive camera view. Press
 `Tab` twice to confirm each model appears instantly without resetting position or normalized
-animation phase. The reference clip defines the common cycle duration; the technician runs
-slightly faster because its authored loop is slightly longer. Press `Space` once to confirm
-both clips flip to `paused` and both poses freeze, press it again to confirm they resume, then
-press `Esc` (exit code `0` from `Running`).
+animation phase. Both `Walk_Loop` clips span the same effective cycle and run at 1.0x. Press
+`Space` once to confirm both clips flip to `paused` and both poses freeze, press it again to
+confirm they resume, then press `Esc` (exit code `0` from `Running`).
 
 If `ArrowDown` is holding an active turnaround, the overlay also shows `Movement: turning around`
 above the help lines.
@@ -388,8 +389,8 @@ The accepted deterministic output is:
 
 ```text
 assets/characters/midcreek/technician-man/technician-man.glb
-SHA-256 ee9ba685ee57a26fe08fb1b54d6b8d436268f4979713b58226a078a32449fd51
-3,424,928 bytes
+SHA-256 2870e6293b8d3af3c4dfa45c8e476f07cf64ec9d6b3569017abc498ef746c79d
+3,425,968 bytes
 ```
 
 ## Re-importing the humanoid asset

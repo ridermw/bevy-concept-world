@@ -846,6 +846,7 @@ pub fn spawn_character(
     mut commands: Commands,
     catalog: Res<CharacterCatalog>,
     prepared: Res<PreparedCharacterCatalog>,
+    selection: Res<CharacterSelection>,
     real: Res<Time<Real>>,
 ) {
     commands.insert_resource(ValidatingStartedAt(real.elapsed()));
@@ -861,20 +862,17 @@ pub fn spawn_character(
         ))
         .id();
 
-    for (variant, config, prepared, visibility) in [
-        (
-            CharacterVariant::Reference,
-            &catalog.reference,
-            &prepared.reference,
-            Visibility::Inherited,
-        ),
-        (
-            CharacterVariant::TechnicianMan,
-            &catalog.technician_man,
-            &prepared.technician_man,
-            Visibility::Hidden,
-        ),
-    ] {
+    for variant in CharacterVariant::ALL {
+        let config = variant.config(&catalog);
+        let prepared = match variant {
+            CharacterVariant::Reference => &prepared.reference,
+            CharacterVariant::TechnicianMan => &prepared.technician_man,
+        };
+        let visibility = if variant == selection.active() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
         commands
             .spawn((
                 Name::new(variant.label()),
