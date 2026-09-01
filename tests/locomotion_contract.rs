@@ -144,6 +144,29 @@ fn locomotion_app(initial_state: PrototypeState) -> App {
     app
 }
 
+fn spawn_humanoid(app: &mut App) -> Entity {
+    app.world_mut()
+        .spawn((
+            Humanoid,
+            HumanoidController::default(),
+            character_transform(0.5, 180.0),
+            GlobalTransform::default(),
+        ))
+        .id()
+}
+
+fn spawn_orbit_camera(app: &mut App) -> Entity {
+    let orbit = OrbitCamera::from_position_and_focus(CAMERA_POSITION, LOOK_AT);
+    app.world_mut()
+        .spawn((
+            Camera3d::default(),
+            orbit,
+            orbit_camera_transform(Vec3::ZERO, orbit),
+            GlobalTransform::default(),
+        ))
+        .id()
+}
+
 fn enter(app: &mut App, state: PrototypeState) {
     app.world_mut()
         .resource_mut::<NextState<PrototypeState>>()
@@ -873,12 +896,7 @@ fn orbit_camera_updates_only_while_running_and_follows_post_movement_target() {
 fn orbit_camera_converts_pixel_scroll_to_line_zoom() {
     let mut app = locomotion_app(PrototypeState::Running);
     let orbit = OrbitCamera::from_position_and_focus(CAMERA_POSITION, LOOK_AT);
-    let _humanoid = app.world_mut().spawn((
-        Humanoid,
-        HumanoidController::default(),
-        character_transform(0.5, 180.0),
-        GlobalTransform::default(),
-    ));
+    let _humanoid = spawn_humanoid(&mut app);
     let camera = app
         .world_mut()
         .spawn((
@@ -902,4 +920,138 @@ fn orbit_camera_converts_pixel_scroll_to_line_zoom() {
         .get::<OrbitCamera>()
         .expect("orbit camera state must stay attached");
     assert_close(orbit_state.target_distance, orbit.target_distance - 0.75);
+}
+
+#[test]
+fn orbit_camera_stays_put_with_no_humanoid_targets() {
+    let mut app = locomotion_app(PrototypeState::Running);
+    let camera = spawn_orbit_camera(&mut app);
+    let initial_camera = *app
+        .world()
+        .entity(camera)
+        .get::<Transform>()
+        .expect("orbit camera must have a transform before update");
+
+    app.update();
+
+    let updated_camera = *app
+        .world()
+        .entity(camera)
+        .get::<Transform>()
+        .expect("orbit camera must still have a transform");
+    assert_eq!(updated_camera, initial_camera);
+}
+
+#[test]
+fn orbit_camera_stays_put_with_multiple_humanoid_targets() {
+    let mut app = locomotion_app(PrototypeState::Running);
+    let humanoid_a = spawn_humanoid(&mut app);
+    let humanoid_b = spawn_humanoid(&mut app);
+    let camera = spawn_orbit_camera(&mut app);
+    let initial_camera = *app
+        .world()
+        .entity(camera)
+        .get::<Transform>()
+        .expect("orbit camera must have a transform before update");
+    let initial_humanoid_a = *app
+        .world()
+        .entity(humanoid_a)
+        .get::<Transform>()
+        .expect("humanoid root must have a transform before update");
+    let initial_humanoid_b = *app
+        .world()
+        .entity(humanoid_b)
+        .get::<Transform>()
+        .expect("humanoid root must have a transform before update");
+
+    app.update();
+
+    let updated_camera = *app
+        .world()
+        .entity(camera)
+        .get::<Transform>()
+        .expect("orbit camera must still have a transform");
+    assert_eq!(updated_camera, initial_camera);
+
+    assert_eq!(
+        *app.world()
+            .entity(humanoid_a)
+            .get::<Transform>()
+            .expect("humanoid root must still have a transform"),
+        initial_humanoid_a
+    );
+    assert_eq!(
+        *app.world()
+            .entity(humanoid_b)
+            .get::<Transform>()
+            .expect("humanoid root must still have a transform"),
+        initial_humanoid_b
+    );
+}
+
+#[test]
+fn humanoid_stays_put_with_no_orbit_camera_targets() {
+    let mut app = locomotion_app(PrototypeState::Running);
+    let humanoid = spawn_humanoid(&mut app);
+    let initial_humanoid = *app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .expect("humanoid root must have a transform before update");
+
+    app.update();
+
+    let updated_humanoid = *app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .expect("humanoid root must still have a transform");
+    assert_eq!(updated_humanoid, initial_humanoid);
+}
+
+#[test]
+fn both_orbit_cameras_stay_put_with_multiple_camera_targets() {
+    let mut app = locomotion_app(PrototypeState::Running);
+    let humanoid = spawn_humanoid(&mut app);
+    let camera_a = spawn_orbit_camera(&mut app);
+    let camera_b = spawn_orbit_camera(&mut app);
+    let initial_humanoid = *app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .expect("humanoid root must have a transform before update");
+    let initial_camera_a = *app
+        .world()
+        .entity(camera_a)
+        .get::<Transform>()
+        .expect("orbit camera must have a transform before update");
+    let initial_camera_b = *app
+        .world()
+        .entity(camera_b)
+        .get::<Transform>()
+        .expect("orbit camera must have a transform before update");
+
+    app.update();
+
+    assert_eq!(
+        *app.world()
+            .entity(humanoid)
+            .get::<Transform>()
+            .expect("humanoid root must still have a transform"),
+        initial_humanoid
+    );
+    assert_eq!(
+        *app.world()
+            .entity(camera_a)
+            .get::<Transform>()
+            .expect("orbit camera must still have a transform"),
+        initial_camera_a
+    );
+    assert_eq!(
+        *app.world()
+            .entity(camera_b)
+            .get::<Transform>()
+            .expect("orbit camera must still have a transform"),
+        initial_camera_b
+    );
 }
