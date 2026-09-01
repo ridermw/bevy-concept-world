@@ -32,8 +32,11 @@
 | Unattended capture verified a non-empty file before exiting `0` | **PASSED** |
 | Every failure path observed exits nonzero | **PASSED** |
 | Asset root found from an unrelated working directory | **PASSED** |
-| Visual acceptance — static criteria (upright, scale, facing, deformation) | **NOT VERIFIED** |
-| Visual acceptance — live criteria (gait advancement, loop seam, pause/resume) | **NOT VERIFIED** |
+| Reference visual acceptance — static criteria (upright, scale, facing, deformation) | **PASSED** (hardware-GPU screenshot, 2026-09-01) |
+| Reference visual acceptance — live criteria (gait advancement, loop seam, pause/resume) | **PASSED** (operator observation, 2026-09-01) |
+| Reference steering and camera feel (turns, turnaround, orbit, zoom) | **PASSED** (operator observation, 2026-09-01) |
+| Generated technician visual acceptance — silhouette, equipment, deformation, clipping | **NOT VERIFIED** (needs a hardware-GPU review) |
+| Generated technician model switching and loop seam | **NOT VERIFIED VISUALLY** (runtime contracts and software-adapter startup passed) |
 | Performance baseline: the binary emits every required number | **PASSED** (instrumented) |
 | Performance baseline: the numbers themselves | **NOT MEASURED** (needs a GPU host) |
 
@@ -417,10 +420,9 @@ INFO bevy_diagnostic: frame_time:  138.282000ms (avg 67.718719ms)
 The drift from a 34 ms average to a 68 ms average inside ninety seconds is
 itself why this adapter cannot supply a steady-state figure.
 
-The real measurements are taken in the same GPU-host session that closes the
-visual gate, and recorded here. They are a baseline for future comparison, not
-pass/fail targets, so nothing in this milestone is blocked on their values —
-only on their being real.
+The real measurements still need to be recorded from a GPU-host session. They
+are a baseline for future comparison, not part of the now-complete visual
+acceptance gate.
 
 ## Captured evidence
 
@@ -451,7 +453,7 @@ present in it.** It is overlay evidence only and is deliberately *not* named
 kept only under the honest overlay name. A later hardware-GPU run added
 `docs/validation/humanoid-walk.png`; the two files represent different runs.
 
-## Why the visual gate is still open
+## Why the software-renderer host could not close the visual gate
 
 The 3D inspection scene cannot be rendered on this host:
 
@@ -473,21 +475,21 @@ The 3D inspection scene cannot be rendered on this host:
   waited out; the cost tracks the adapter, not the build profile's application
   code.
 
-## Hardware-GPU visual review
+## Hardware-GPU visual review — passed 2026-09-01
 
-The base walk was subsequently run on an Apple M4 Pro Metal adapter and a
-hardware-GPU screenshot was committed. The interactive steering feature still
-requires the human feel check described at the end of this document. Use the
-exact commands below from the repository root, then confirm each acceptance
-criterion by eye.
+The walk and interactive controls were subsequently run on an Apple M4 Pro
+Metal adapter, and a hardware-GPU screenshot was committed as
+[`humanoid-walk.png`](humanoid-walk.png). The operator confirmed all static,
+live-animation, locomotion, and camera acceptance criteria described below.
+The run used the following command from the repository root:
 
 ```powershell
 cd <path-to>\bevy-concept-world
 cargo run --release
 ```
 
-Do not set `HUMANOID_WALK_CAPTURE_SECONDS` for this run: the point is to watch
-the animation, and an unattended run exits as soon as it has captured a frame.
+`HUMANOID_WALK_CAPTURE_SECONDS` was not used because the animation and controls
+were observed interactively.
 
 Controls:
 
@@ -502,8 +504,7 @@ Controls:
 | `P` | Write `docs/validation/humanoid-walk.png` from the current orbit-camera view |
 | `Esc` | Exit — `0` from `Running`, nonzero from `Failed` |
 
-Wait until the overlay in the top-left reads as follows. Compare the content of
-each line, not its exact spacing:
+The overlay in the top-left reached:
 
 ```
 State: Running
@@ -518,10 +519,8 @@ Space: pause/resume   P: screenshot   Esc: exit
 animation graph)` means a player was found but never wired up. This is the same
 state the software-renderer host already reaches.
 
-Then press `P`. The screenshot path is relative to the working directory, so a
-run started from the repository root writes
-**`docs/validation/humanoid-walk.png`** inside the checkout. Commit that image
-and record the outcome in this file.
+Pressing `P` wrote **`docs/validation/humanoid-walk.png`** inside the checkout;
+that hardware-GPU image is committed.
 
 ### What the PNG can prove, and what it cannot
 
@@ -552,9 +551,10 @@ evidence for them:
    to `paused`, and pressing it again resumes from that pose without reloading
    the asset. This is a control behaviour, not an appearance.
 
-Record criteria 5–8 as an explicit observation ("watched N loops; feet
-alternate; no seam hitch; `Space` froze and resumed"), not as an inference from
-the screenshot.
+The operator explicitly confirmed criteria 5–8 from the live window: the gait
+advanced with alternating feet, repeated loops had no visible seam hitch, the
+in-place root remained stationary when movement input was released, and
+`Space` froze and resumed the animation without reloading the asset.
 
 ### Also record the performance baseline
 
@@ -606,18 +606,11 @@ Running-only transform mutation, camera follow ordering, orbit direction,
 line/pixel wheel conversion, zoom clamping, smooth zoom convergence, and safe
 handling of absent or duplicate camera/character entities.
 
-### Remaining human gate
+### Human steering and camera gate — passed 2026-09-01
 
-Automated tests establish deterministic controls and transforms, but not whether
-the motion looks convincing. On a hardware-GPU host, confirm:
-
-1. Left and Right create visually smooth turns with the model facing its travel
-   direction.
-2. Down creates one natural-looking 180-degree reversal and then continues in
-   the opposite direction while held.
-3. Q and E orbit in opposite directions while keeping the humanoid centered.
-4. Mouse-wheel zoom is responsive and respects useful near/far framing.
-5. Space, P, and Escape retain their previous behavior.
-
-This visual steering-feel check is intentionally assigned to the human operator;
-it is not inferred from the software-renderer capture.
+The operator confirmed on the hardware-GPU host that Left and Right produce
+smooth turns with the model facing its travel direction; Down produces one
+natural-looking gradual reversal and continues in the opposite direction while
+held; Q and E orbit in opposite directions while keeping the humanoid centered;
+mouse-wheel zoom is responsive with useful near/far limits; and Space, P, and
+Escape retain their intended behavior.

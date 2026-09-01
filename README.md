@@ -35,12 +35,12 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
       including a missing validation start marker; the successful production startup and
       capture path was exercised against the release binary and is recorded in
       [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
-- [ ] Visual gate: Confirm the humanoid on screen. The committed screenshot can only settle the
-      static criteria — upright, correctly scaled, facing the forward marker, limbs intact.
-      Gait advancement, a clean loop seam, and pause/resume must be confirmed by watching the
-      live window and writing the observation down.
-      *(blocked — this host has no GPU; wgpu falls back to a software rasterizer that
-      renders no 3D geometry, and the process does not terminate after capture verification)*
+- [x] Reference-humanoid visual gate: confirmed on a hardware-GPU host on September 1, 2026.
+      The committed
+      [`humanoid-walk.png`](docs/validation/humanoid-walk.png) shows the upright, correctly
+      scaled humanoid facing the forward marker with intact deformation. The operator also
+      watched the live run and confirmed gait advancement, a clean loop seam, stationary
+      in-place animation, pause/resume, steering, turnaround, orbit, and zoom behavior.
 - [ ] Performance baseline: startup time, steady-state frame time, entity count, mesh and
       material count, and decoded texture bytes. *(instrumented and ready to read; **not yet
       measured** — see [Performance baseline](#performance-baseline). The binary now logs every
@@ -62,9 +62,13 @@ manifest transform, world scene, animation graph, and readiness record. Referenc
 visible, the technician starts hidden, and `Tab` changes only `CharacterSelection` and the two
 child `Visibility` values.
 
-What is **not** yet verified is how the generated technician looks in motion: the software
-DX12 adapter used by this host can capture the overlay but not the 3D render. The exact
-remaining visual check and its acceptance criteria are written down in
+The reference humanoid's hardware-GPU visual behavior is also verified. The September 1,
+2026 review confirmed the recorded
+`yaw_degrees` of `180.0`, unit scale, skinned deformation, gait and loop quality, in-place
+root behavior, and the interactive locomotion and camera controls. What is **not** yet
+verified is how the generated technician looks in motion: the software DX12 adapter used by
+this host can capture the overlay but not the 3D render. The evidence and remaining acceptance
+criteria are recorded in
 [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
 
 The reference humanoid asset is imported and locked.
@@ -100,7 +104,9 @@ Controls:
 | `P` | Write `docs/validation/humanoid-walk.png` from the current orbit-camera view |
 | `Esc` | Exit — with a **nonzero** exit code if the run is in `Failed`, zero otherwise |
 
-The in-place walk animation stays in place when no movement key is held, and the human steering-feel gate remains manual: watch the live motion, orbit, zoom, and turnaround behavior on a GPU desktop session and record the result yourself.
+The in-place walk animation stays in place when no movement key is held. The September 1,
+2026 hardware-GPU review confirmed the live motion, steering, orbit, zoom, and turnaround
+behavior.
 
 The on-screen overlay reports the runtime state, active model, readiness and discovered player
 count for each variant, the total animation players and graph wiring, each clip's duration and
@@ -146,19 +152,17 @@ requested, so a previous run's image can never be mistaken for this one's. A mis
 empty file, a run that never reached `Running`, and any fatal failure all exit nonzero with an
 actionable report.
 
-## Closing the visual gate on a GPU host
+## Hardware-GPU visual gate
 
-Everything except the on-screen check is verified, and the performance numbers are
-instrumented but unmeasured. To close both, clone or copy this checkout onto a machine with a
-GPU-accelerated desktop session and run, **from the repository root**:
+The visual gate was closed on September 1, 2026 using a hardware-GPU desktop session. The
+run was started from the repository root with:
 
 ```powershell
 cd <path-to>\bevy-concept-world
 cargo run --release
 ```
 
-Wait for the overlay to read `State: Running`. Compare the content of each line, not its exact
-spacing:
+The overlay reached:
 
 ```
 State: Running
@@ -173,25 +177,22 @@ Tab: switch model   Space: pause/resume
 P: screenshot   Esc: exit
 ```
 
-Then press `P`. That writes `docs/validation/humanoid-walk.png` — relative to the working
-directory, so run it from the repository root — from the current interactive camera view. Press
-`Tab` twice to confirm each model appears instantly without resetting position or normalized
-animation phase. Both `Walk_Loop` clips span the same effective cycle and run at 1.0x. Press
-`Space` once to confirm both clips flip to `paused` and both poses freeze, press it again to
-confirm they resume, then press `Esc` (exit code `0` from `Running`).
+The committed [`docs/validation/humanoid-walk.png`](docs/validation/humanoid-walk.png)
+provides static evidence for the reference humanoid: upright posture, scale against the
+one-meter marker, facing along the `-Z` marker, intact limbs, and a plausible walk pose. The
+operator separately confirmed its time-based criteria in the live window: advancing gait,
+alternating feet, a clean loop seam, stationary in-place root animation, pause/resume without
+reload, smooth left/right steering, one gradual Down-arrow turnaround, camera orbit in both
+directions, responsive bounded zoom, screenshot capture, and clean exit.
 
-If `ArrowDown` is holding an active turnaround, the overlay also shows `Movement: turning around`
-above the help lines.
+The generated technician still needs the same hardware-GPU review. Press `Tab` twice to
+confirm each model appears instantly without resetting position or normalized animation phase.
+Both `Walk_Loop` clips span the same effective cycle and run at 1.0x. Press `Space` once to
+confirm both clips flip to `paused` and both poses freeze, press it again to confirm they
+resume, then press `Esc` (exit code `0` from `Running`).
 
-**The PNG and the live window prove different things, and the difference matters.** A single
-still frame can only show the static criteria — upright posture, scale against the one-meter
-marker, facing along the `-Z` marker, no collapsed or detached limbs, a stationary root. It
-cannot show gait advancement, a clean loop seam, or that `Space` pauses and resumes, because
-each of those is a statement about *change over time*. Those three must be confirmed by
-watching the running window, and the observation written down; the committed image is not
-evidence for them. The full split is in
-[*Remaining work to close the visual gate*](docs/validation/humanoid-smoke-test.md#remaining-work-to-close-the-visual-gate).
-Commit the image and record both the still-frame result and the live observation there.
+The performance instrumentation remains ready, but its GPU-host measurements have not yet
+been recorded.
 
 ## Performance baseline
 
