@@ -425,6 +425,67 @@ fn rejects_infinite_scale() {
 }
 
 #[test]
+fn accepts_a_negative_yaw() {
+    let mut fixture = Fixture::default();
+    fixture.yaw_degrees = -90.0;
+    let root = write_fixture(&fixture);
+
+    let config = load_character_config(root.path()).unwrap();
+
+    assert_eq!(config.yaw_degrees, -90.0);
+}
+
+#[test]
+fn rejects_nan_yaw() {
+    let mut fixture = Fixture::default();
+    fixture.yaw_degrees = f32::NAN;
+    let root = write_fixture(&fixture);
+
+    let result = load_character_config(root.path());
+
+    assert!(matches!(result, Err(ConfigError::InvalidYaw(v)) if v.is_nan()));
+}
+
+#[test]
+fn rejects_positive_infinite_yaw() {
+    let mut fixture = Fixture::default();
+    fixture.yaw_degrees = f32::INFINITY;
+    let root = write_fixture(&fixture);
+
+    let result = load_character_config(root.path());
+
+    assert!(
+        matches!(result, Err(ConfigError::InvalidYaw(v)) if v.is_infinite() && v.is_sign_positive())
+    );
+}
+
+#[test]
+fn rejects_negative_infinite_yaw() {
+    let mut fixture = Fixture::default();
+    fixture.yaw_degrees = f32::NEG_INFINITY;
+    let root = write_fixture(&fixture);
+
+    let result = load_character_config(root.path());
+
+    assert!(
+        matches!(result, Err(ConfigError::InvalidYaw(v)) if v.is_infinite() && v.is_sign_negative())
+    );
+}
+
+#[test]
+fn an_invalid_yaw_is_reported_with_its_value() {
+    let mut fixture = Fixture::default();
+    fixture.yaw_degrees = f32::NAN;
+    let root = write_fixture(&fixture);
+
+    let error = load_character_config(root.path()).unwrap_err();
+
+    let message = error.to_string();
+    assert!(message.contains("yaw_degrees"), "{message}");
+    assert!(message.contains("NaN"), "{message}");
+}
+
+#[test]
 fn rejects_zero_expected_animation_players() {
     let mut fixture = Fixture::default();
     fixture.expected_animation_players = 0;
