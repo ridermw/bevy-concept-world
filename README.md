@@ -65,7 +65,7 @@ Controls:
 | `Q` / `E` | Orbit the camera left or right |
 | Mouse wheel | Zoom the orbit camera, clamped to the configured minimum and maximum distance |
 | `Space` | Pause or resume the walk animation without reloading the asset |
-| `P` | Write `docs/validation/humanoid-walk.png` from the fixed inspection camera |
+| `P` | Write `docs/validation/humanoid-walk.png` from the current orbit-camera view |
 | `Esc` | Exit — with a **nonzero** exit code if the run is in `Failed`, zero otherwise |
 
 The in-place walk animation stays in place when no movement key is held, and the human steering-feel gate remains manual: watch the live motion, orbit, zoom, and turnaround behavior on a GPU desktop session and record the result yourself.
@@ -139,7 +139,7 @@ Space: pause/resume   P: screenshot   Esc: exit
 ```
 
 Then press `P`. That writes `docs/validation/humanoid-walk.png` — relative to the working
-directory, so run it from the repository root — from the fixed inspection camera. Press
+directory, so run it from the repository root — from the current interactive camera view. Press
 `Space` once to confirm the overlay flips to `paused` and the pose freezes, press it again to
 confirm it resumes, then press `Esc` (exit code `0` from `Running`).
 
@@ -273,7 +273,7 @@ presented as success. In a scripted run — one where `HUMANOID_WALK_CAPTURE_SEC
 | `src/lib.rs` | Resolve the asset root: env override, working directory, then executable-relative |
 | `src/config.rs` | Parse and validate `character.ron` and `asset.lock.ron` before Bevy starts |
 | `src/state.rs` | `Loading` / `Validating` / `Running` / `Failed`, the first-failure-wins report, and the `Escape` exit code |
-| `src/inspection.rs` | Fixed camera, ground, key light with shadows, ambient light, one-meter marker, `-Z` forward marker |
+| `src/inspection.rs` | Initial orbit-camera framing, ground, key light with shadows, ambient light, one-meter marker, `-Z` forward marker |
 | `src/character.rs` | Poll the real load states, validate the glTF's real names, spawn from `OnEnter(Validating)`, discover its real `AnimationPlayer`s, loop the clip |
 | `src/diagnostics.rs` | Status and failure overlay, pause/resume, screenshot, exit, and the verified unattended capture |
 | `src/perf.rs` | Filtered frame-time logging and the one-time `performance baseline:` line taken on entering `Running` |

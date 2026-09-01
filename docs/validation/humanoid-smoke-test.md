@@ -366,11 +366,9 @@ graph)` rather than being invisible.
 
 The rest of that frame is Bevy's default clear colour. **No 3D geometry is
 present in it.** It is overlay evidence only and is deliberately *not* named
-`humanoid-walk.png`; the fixed-camera visual acceptance image required by the
-design has not been produced. `docs/validation/humanoid-walk.png` is
-intentionally absent from the repository for that reason — the successful
-capture run above wrote it, it was inspected, and it was kept only under the
-honest name.
+`humanoid-walk.png`. At the time of this software-renderer run, its output was
+kept only under the honest overlay name. A later hardware-GPU run added
+`docs/validation/humanoid-walk.png`; the two files represent different runs.
 
 ## Why the visual gate is still open
 
@@ -394,14 +392,13 @@ The 3D inspection scene cannot be rendered on this host:
   waited out; the cost tracks the adapter, not the build profile's application
   code.
 
-## Remaining work to close the visual gate
+## Hardware-GPU visual review
 
-Two gates are left: this one, and the *values* of the performance baseline (its
-instrumentation is done — see
-[Performance baseline](#performance-baseline--instrumented-not-measured-here)).
-Both close in the same session. Run the exact commands below on a machine with a
-GPU-accelerated desktop session, from the repository root, then confirm each
-acceptance criterion by eye.
+The base walk was subsequently run on an Apple M4 Pro Metal adapter and a
+hardware-GPU screenshot was committed. The interactive steering feature still
+requires the human feel check described at the end of this document. Use the
+exact commands below from the repository root, then confirm each acceptance
+criterion by eye.
 
 ```powershell
 cd <path-to>\bevy-concept-world
@@ -415,8 +412,13 @@ Controls:
 
 | Key | Effect |
 |---|---|
+| `Up` | Walk straight ahead |
+| `Left` / `Right` | Walk forward while steering |
+| `Down` | Turn around once and continue in the opposite direction while held |
+| `Q` / `E` | Orbit the camera left or right |
+| Mouse wheel | Zoom the orbit camera within its near/far limits |
 | `Space` | Pause or resume the walk without reloading the asset |
-| `P` | Write `docs/validation/humanoid-walk.png` from the fixed inspection camera |
+| `P` | Write `docs/validation/humanoid-walk.png` from the current orbit-camera view |
 | `Esc` | Exit — `0` from `Running`, nonzero from `Failed` |
 
 Wait until the overlay in the top-left reads as follows. Compare the content of
