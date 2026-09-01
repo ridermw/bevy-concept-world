@@ -4,8 +4,6 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
 
 ## Current status
 
-Design is complete for the first vertical slice:
-
 - [x] Build gate: Bevy 0.19.1 toolchain builds and starts `animated_mesh_control` without panic.
       See [`docs/validation/engine-smoke-test.md`](docs/validation/engine-smoke-test.md).
 - [ ] Visual gate: Confirm animated Fox renders and clips switch in a GPU-accelerated desktop session. *(deferred — requires display)*
@@ -15,16 +13,72 @@ Design is complete for the first vertical slice:
 - [x] Validate the manifest and asset integrity in Rust: `src/config.rs` parses
       `character.ron` and `asset.lock.ron`, rejects unsafe paths and out-of-range fields,
       and re-hashes the GLB before any asset loading. Covered by `tests/config_contract.rs`.
-- [ ] Load and loop that walk in a standalone Bevy application.
+- [x] Load and loop that walk in a standalone Bevy application: a release run of
+      `bevy-concept-world` loads the locked GLB, validates the exact `Scene` and `Walk_Loop`
+      names against the real file, discovers exactly one `AnimationPlayer` in the spawned
+      hierarchy, attaches the animation graph, and reaches `Running` with the clip looping.
+      See [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
+- [ ] Visual gate: Confirm on screen that the humanoid is upright, correctly scaled,
+      facing the forward marker, and deforming cleanly through the walk loop.
+      *(blocked — this host has no GPU; wgpu falls back to a software rasterizer that
+      renders no 3D geometry and then times out)*
+- [ ] Replace the reference mesh with the first concept-art-derived mesh.
 
-Implementation has started: the engine startup smoke gate has passed. Visual Fox animation
-confirmation is deferred pending a GPU-accelerated desktop session.
+The humanoid runtime is implemented and its asset contract is verified end to end against
+the real GLB. What is **not** yet verified is how it looks: the recorded `yaw_degrees` of
+`180.0`, the unit scale, and the quality of the skinned deformation and loop seam have never
+been confirmed on screen, because the validation host has no GPU-accelerated display. The
+exact remaining check and its acceptance criteria are written down in
+[`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
 
 The humanoid asset is imported and locked. `assets/characters/quaternius/UAL1_Standard.glb`
 comes from the official CC0 Quaternius Universal Animation Library v3.0 Standard download,
 parses as a single `Scene` with one skinned `Mannequin` mesh and exactly one `Walk_Loop`
 clip whose root translation is zero for the whole clip. Its preserved CC0 license, stable
 `character.ron` contract, and generated `asset.lock.ron` are checked in.
+
+## Run
+
+```powershell
+cargo run --release
+```
+
+The application resolves its asset root from the crate directory, so it can be launched from
+any working directory. Controls:
+
+| Key | Effect |
+|---|---|
+| `Space` | Pause or resume the walk animation without reloading the asset |
+| `P` | Write `docs/validation/humanoid-walk.png` from the fixed inspection camera |
+| `Esc` | Exit |
+
+The on-screen overlay reports the runtime state, the asset, the selected scene and clip, the
+number of animation players discovered in the spawned scene, the clip duration and playback
+speed, and the full detail of any fatal failure.
+
+If bootstrap fails — a missing manifest, a failed integrity check, a renamed scene or clip, or
+an unexpected animation-player count — the window still opens, the application enters the
+terminal `Failed` state, and the reason is shown on screen and logged. It is never replaced
+with a placeholder or a blank scene presented as success.
+
+On a host with no interactive desktop session, set `HUMANOID_WALK_CAPTURE_SECONDS` to a whole
+number of seconds to take the same screenshot unattended and then exit.
+
+## Runtime structure
+
+| Module | Responsibility |
+|---|---|
+| `src/config.rs` | Parse and validate `character.ron` and `asset.lock.ron` before Bevy starts |
+| `src/state.rs` | `Loading` / `Validating` / `Running` / `Failed` and the first-failure-wins report |
+| `src/inspection.rs` | Fixed camera, ground, key light with shadows, ambient light, one-meter marker, `-Z` forward marker |
+| `src/character.rs` | Load the root `Gltf`, validate its real names, spawn it, discover its real `AnimationPlayer`s, loop the clip |
+| `src/diagnostics.rs` | Status and failure overlay, pause/resume, screenshot, exit |
+
+`src/character.rs` never substitutes an expected value for an observed one: the discovered
+scene and clip names come from the loaded `Gltf`, and the animation-player count comes from
+walking the spawned hierarchy. Both are checked by pure functions covered in
+`tests/app_contract.rs`, which also asserts the manifest's `Scene` and `Walk_Loop` really
+exist in the checked-in GLB.
 
 ## Manifest and integrity validation
 
@@ -44,8 +98,8 @@ asset root it:
   64 ASCII hex characters, compared case-insensitively;
 - re-hashes the GLB and compares SHA-256 and byte size against the lock.
 
-Standalone humanoid animation is still **not** complete: no loader, inspection scene, or
-animation code exists yet, so the walk has never been played. The recorded `yaw_degrees` of
+Standalone humanoid animation is now implemented and its asset contract is verified end to
+end against the real GLB, but it has still never been **seen**: the recorded `yaw_degrees` of
 `180.0` is derived from the asset's bind-pose geometry (the toe and ball joints sit ahead of
 the ankle along `+Z`) and Bevy's `-Z` forward convention, and still awaits on-screen visual
 confirmation. See
