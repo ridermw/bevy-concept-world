@@ -59,9 +59,25 @@ fn assert_chunk_invariant_for_steering(
             (update_heading, translation + update_translation)
         });
 
-    let heading_error = (single_heading - repeated.0).abs();
+    let heading_error = normalize_angle(single_heading - repeated.0).abs();
+    let repeated_heading_change = normalize_angle(repeated.0 - start_heading);
     let translation_error = single_translation.distance(repeated.1);
 
+    assert!(
+        repeated_heading_change != 0.0,
+        "expected repeated heading to change from start, steering={steering}, start={start_heading}, got {repeated_heading_change}"
+    );
+    if steering.is_sign_positive() {
+        assert!(
+            repeated_heading_change > 0.0,
+            "expected repeated heading to move positively for steering={steering}, start={start_heading}, got {repeated_heading_change}"
+        );
+    } else {
+        assert!(
+            repeated_heading_change < 0.0,
+            "expected repeated heading to move negatively for steering={steering}, start={start_heading}, got {repeated_heading_change}"
+        );
+    }
     assert!(
         heading_error <= 2.0e-6,
         "expected chunk-invariant heading within 2.0e-6, single={single_heading}, repeated={}, error={heading_error}",
@@ -515,17 +531,17 @@ fn slightly_larger_negative_steering_remains_chunk_invariant() {
 
 #[test]
 fn tiny_steering_remains_chunk_invariant_at_60_chunks() {
-    assert_chunk_invariant_for_steering(0.25, 1.3e-6, 60, 12);
+    assert_chunk_invariant_for_steering(0.0, 1.3e-6, 60, 12);
 }
 
 #[test]
 fn tiny_steering_remains_chunk_invariant_at_144_chunks() {
-    assert_chunk_invariant_for_steering(0.25, 1.3e-6, 144, 5);
+    assert_chunk_invariant_for_steering(0.0, 1.3e-6, 144, 5);
 }
 
 #[test]
 fn tiny_steering_remains_chunk_invariant_at_240_chunks() {
-    assert_chunk_invariant_for_steering(0.25, 1.3e-6, 240, 3);
+    assert_chunk_invariant_for_steering(0.0, 1.3e-6, 240, 3);
 }
 
 #[test]
