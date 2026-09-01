@@ -11,7 +11,7 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use bevy_concept_world::config::{
-    ConfigError, load_character_catalog, load_character_config, load_character_config_from,
+    CharacterConfig, ConfigError, load_character_catalog, load_character_config_from,
 };
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -21,6 +21,11 @@ use tempfile::{TempDir, tempdir};
 /// Bytes written as the fixture "GLB" — never a real glTF, just known
 /// content whose hash and size the fixture lock is built from.
 const MODEL_BYTES: &[u8] = b"fixture model bytes used only by config_contract tests";
+const REFERENCE_CHARACTER_DIR: &str = "characters/quaternius";
+
+fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, ConfigError> {
+    load_character_config_from(asset_root, Path::new(REFERENCE_CHARACTER_DIR))
+}
 
 /// A mutable copy of every `character.ron` field, with valid defaults.
 /// Individual tests mutate exactly the field(s) they want to break.

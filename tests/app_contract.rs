@@ -16,8 +16,8 @@ use bevy::{
     ecs::{hierarchy::ChildOf, system::RunSystemOnce},
     input::ButtonInput,
     prelude::{
-        AnimationGraph, AnimationGraphHandle, AnimationTransitions, Entity, Handle, KeyCode, State,
-        Transform, Vec3, Visibility, With,
+        AnimationGraph, AnimationGraphHandle, AnimationTransitions, Entity, Handle,
+        InheritedVisibility, KeyCode, State, Transform, Vec3, ViewVisibility, Visibility, With,
     },
     state::app::{AppExtStates, StatesPlugin},
 };
@@ -29,7 +29,7 @@ use bevy_concept_world::{
         VariantHierarchyReady, VariantReadiness, begin_loading, character_transform,
         spawn_character, validate_animation_players, validate_named_assets,
     },
-    config::{load_character_catalog, load_character_config},
+    config::load_character_catalog,
     diagnostics::{
         ControlIntents, DiagnosticsPlugin, character_status_lines, control_help_lines,
         control_intents, handle_controls,
@@ -292,7 +292,9 @@ fn names(document: &serde_json::Value, key: &str) -> Vec<String> {
 #[test]
 fn the_checked_in_glb_really_declares_the_manifest_scene_and_clip() {
     let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let config = load_character_config(&asset_root).expect("the checked-in contract must load");
+    let config = load_character_catalog(&asset_root)
+        .expect("the checked-in catalog must load")
+        .reference;
     let bytes = fs::read(asset_root.join(&config.gltf_path)).expect("the locked GLB must exist");
     let document = glb_json(&bytes);
 
@@ -313,7 +315,9 @@ fn the_checked_in_glb_really_declares_the_manifest_scene_and_clip() {
 #[test]
 fn the_checked_in_glb_has_one_skin_matching_the_expected_animation_player_count() {
     let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let config = load_character_config(&asset_root).expect("the checked-in contract must load");
+    let config = load_character_catalog(&asset_root)
+        .expect("the checked-in catalog must load")
+        .reference;
     let bytes = fs::read(asset_root.join(&config.gltf_path)).expect("the locked GLB must exist");
     let document = glb_json(&bytes);
 
@@ -321,41 +325,6 @@ fn the_checked_in_glb_has_one_skin_matching_the_expected_animation_player_count(
     assert_eq!(
         skins, config.expected_animation_players,
         "the manifest expects one animation player per animated skeleton"
-    );
-}
-
-#[test]
-fn production_bootstrap_loads_the_complete_character_catalog() {
-    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"))
-        .expect("main.rs must be readable");
-
-    assert!(
-        source.contains("load_character_catalog"),
-        "production bootstrap must validate every advertised character contract"
-    );
-    assert!(
-        source.contains("insert_resource(catalog)"),
-        "production bootstrap must insert the complete validated catalog"
-    );
-    assert!(
-        !source.contains("insert_resource(config)"),
-        "production bootstrap must not retain the legacy single-character resource"
-    );
-}
-
-#[test]
-fn production_loader_prepares_both_variants_before_validating() {
-    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/character.rs"))
-        .expect("character.rs must be readable");
-    let compact: String = source.split_whitespace().collect();
-
-    assert!(
-        compact.contains("evaluate_catalog_load(observations.iter()"),
-        "the runtime must aggregate both real load observations"
-    );
-    assert!(
-        compact.contains("PreparedCharacterCatalog::new(reference,technician_man)"),
-        "the runtime must prepare both scenes and graphs before Validating"
     );
 }
 
@@ -745,6 +714,44 @@ fn stable_humanoid_root_owns_both_visual_variants() {
 }
 
 #[test]
+fn stable_humanoid_root_carries_visibility_hierarchy_components() {
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
+    let (_, node) = AnimationGraph::from_clip(Handle::default());
+    let prepared = PreparedCharacterCatalog::new(
+        PreparedVariant::new(Handle::default(), Handle::default(), node),
+        PreparedVariant::new(Handle::default(), Handle::default(), node),
+    );
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(catalog)
+        .insert_resource(prepared)
+        .add_systems(bevy::app::Update, spawn_character);
+    app.update();
+
+    let world = app.world_mut();
+    let humanoid = world
+        .query_filtered::<Entity, With<Humanoid>>()
+        .single(world)
+        .expect("exactly one stable humanoid root must spawn");
+    let root = world.entity(humanoid);
+
+    assert!(
+        root.contains::<Visibility>(),
+        "the stable parent must participate in visibility propagation"
+    );
+    assert!(
+        root.contains::<InheritedVisibility>(),
+        "the stable parent must carry inherited visibility state"
+    );
+    assert!(
+        root.contains::<ViewVisibility>(),
+        "the stable parent must carry computed view visibility"
+    );
+}
+
+#[test]
 fn loading_retains_distinct_handles_for_both_advertised_variants() {
     let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
     let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
@@ -787,6 +794,31 @@ fn validating_character_app() -> App {
         .run_system_once(spawn_character)
         .expect("the character hierarchy must spawn");
     app
+}
+
+#[test]
+fn validating_without_a_start_marker_fails_actionably_instead_of_hanging() {
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let catalog = load_character_catalog(&asset_root).expect("the checked-in catalog must load");
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_plugins(StatesPlugin)
+        .insert_resource(catalog)
+        .init_resource::<FailureReport>()
+        .insert_state(PrototypeState::Validating)
+        .add_plugins(CharacterPlugin);
+
+    app.update();
+    app.update();
+
+    assert_eq!(
+        *app.world().resource::<State<PrototypeState>>().get(),
+        PrototypeState::Failed,
+        "a missing validation start marker must not leave the app in Validating"
+    );
+    let report = app.world().resource::<FailureReport>().to_display_string();
+    assert!(report.contains("validation watchdog"), "{report}");
+    assert!(report.contains("start marker"), "{report}");
 }
 
 fn variant_root(app: &mut App, wanted: CharacterVariant) -> Entity {

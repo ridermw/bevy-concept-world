@@ -11,7 +11,6 @@ use bevy::{
 };
 use bevy_concept_world::{
     character::{Humanoid, character_transform},
-    config::{CharacterCatalog, CharacterConfig},
     inspection::{CAMERA_POSITION, LOOK_AT},
     locomotion::{
         CAMERA_MAX_DISTANCE, CAMERA_MIN_DISTANCE, FORWARD_SPEED, HumanoidController,
@@ -111,37 +110,6 @@ fn assert_rotation_close(actual: Quat, expected: Quat) {
     assert_vec3_close(actual * Vec3::Z, expected * Vec3::Z);
 }
 
-fn test_character_config() -> CharacterConfig {
-    CharacterConfig {
-        id: "test-humanoid".into(),
-        gltf_path: "characters/quaternius/humanoid.glb".into(),
-        source_url: "https://example.invalid/humanoid".into(),
-        pack_version: "test".into(),
-        downloaded_on: "2026-09-01".into(),
-        license: "CC0".into(),
-        license_path: "characters/quaternius/LICENSE.txt".into(),
-        scene_name: "Scene".into(),
-        animation_name: "Walk_Loop".into(),
-        expected_animation_players: 1,
-        scale: 0.5,
-        yaw_degrees: 180.0,
-        root_motion: false,
-    }
-}
-
-fn test_character_catalog() -> CharacterCatalog {
-    let reference = test_character_config();
-    let mut technician_man = reference.clone();
-    technician_man.id = "test-technician".into();
-    technician_man.gltf_path = "characters/midcreek/technician-man/technician-man.glb".into();
-    technician_man.scale = 1.0;
-
-    CharacterCatalog {
-        reference,
-        technician_man,
-    }
-}
-
 fn locomotion_app(initial_state: PrototypeState) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
@@ -151,7 +119,6 @@ fn locomotion_app(initial_state: PrototypeState) -> App {
         )))
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(AccumulatedMouseScroll::default())
-        .insert_resource(test_character_catalog())
         .add_plugins(LocomotionPlugin)
         .insert_state(initial_state);
     app
@@ -842,7 +809,6 @@ fn locomotion_changes_only_the_shared_root() {
         )))
         .insert_resource(ButtonInput::<KeyCode>::default())
         .insert_resource(AccumulatedMouseScroll::default())
-        .insert_resource(test_character_catalog())
         .add_plugins(LocomotionPlugin)
         .insert_state(PrototypeState::Running);
 

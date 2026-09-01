@@ -8,8 +8,10 @@
   [Final verification](#final-verification--recorded-2026-09-01).
 - **Bevy:** 0.19.1 (pinned, `Cargo.lock` committed)
 - **Rust:** 1.98.0
-- **Asset:** Quaternius Universal Animation Library v3.0 Standard,
-  `assets/characters/quaternius/UAL1_Standard.glb` (SHA-256 locked)
+- **Assets:** Quaternius Universal Animation Library v3.0 Standard,
+  `assets/characters/quaternius/UAL1_Standard.glb`, plus the generated
+  `assets/characters/midcreek/technician-man/technician-man.glb` (both
+  SHA-256/size locked)
 - **Scene selector:** `Scene`
 - **Clip selector:** `Walk_Loop`
 - **Locomotion:** in-place
@@ -34,6 +36,62 @@
 | Visual acceptance — live criteria (gait advancement, loop seam, pause/resume) | **NOT VERIFIED** |
 | Performance baseline: the binary emits every required number | **PASSED** (instrumented) |
 | Performance baseline: the numbers themselves | **NOT MEASURED** (needs a GPU host) |
+
+## Dual-character review smoke — recorded 2026-09-01
+
+The final review build exercised the production binary after adding the
+resident Midcreek technician, stable parent visibility, and validation
+watchdog correction:
+
+```powershell
+$env:HUMANOID_WALK_CAPTURE_SECONDS = '3'
+.\target\release\bevy-concept-world.exe
+```
+
+The production bootstrap and runtime path loaded both locked contracts and
+both real GLBs, then emitted:
+
+```text
+loading character glTFs: characters/quaternius/UAL1_Standard.glb,
+  characters/midcreek/technician-man/technician-man.glb
+both glTFs match their manifests; entering Validating
+spawned both character scenes; validating their hierarchies
+prototype state: Some(Loading) -> Some(Validating)
+Quaternius reference hierarchy validated; waiting for the other variant
+both character walk loops started in phase
+prototype state: Some(Validating) -> Some(Running)
+unattended capture verified: docs/validation/humanoid-walk.png (232688 bytes);
+  exiting
+```
+
+No B0004 hierarchy warning appeared. The captured overlay showed:
+
+```text
+State: Running
+Active model: Quaternius reference
+Quaternius reference: ready, players 1/1
+Midcreek technician - man: ready, players 1/1
+Animation players: 2 (2 with an animation graph)
+```
+
+The new PNG had SHA-256
+`d4c165381bab7fb75ce633c9500e77251efa387cd8f6b422ff0209e5ea389235`
+and was non-empty, but the Microsoft Basic Render Driver drew only the overlay
+against the clear color: no ground, markers, reference model, or technician
+were visible. It is valid runtime-state evidence but not a visual acceptance
+artifact, so it was rejected and the previously committed reference visual
+screenshot was restored unchanged
+(`12f557a6a86842e5a7439da5d31e1d7f485e4128a6e5a88cead2ca8bc234bd78`,
+2,354,139 bytes).
+
+After logging capture verification and sending `AppExit::Success`, the process
+still had not returned more than four minutes later and was externally
+terminated.
+Therefore this run confirms production bootstrap, both-variant readiness,
+active Reference selection, non-empty capture, and absence of B0004, but it
+does **not** claim a clean process exit or GPU-rendered visual acceptance. The
+exact blocker is the host's CPU-only DX12 Microsoft Basic Render Driver; a
+GPU-accelerated desktop session remains required.
 
 ## Commands
 
@@ -132,7 +190,7 @@ leaving the root `Loaded` and the run stuck.
 
 ### Integrity failure: the checked-in lock really is enforced
 
-The lock is enforced before Bevy starts, by `load_character_config`. The
+The locks are enforced before Bevy starts, by `load_character_catalog`. The
 mutation above (two bytes zeroed) was first run *without* regenerating
 `asset.lock.ron`, and bootstrap rejected it:
 

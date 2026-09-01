@@ -45,8 +45,8 @@ pub struct CharacterCatalog {
 }
 
 /// The integrity lock recorded alongside the manifest, checked in at
-/// `assets/characters/quaternius/asset.lock.ron`. Kept private: callers only
-/// ever observe its effect through [`load_character_config`].
+/// each character's `asset.lock.ron`. Kept private: callers only observe its
+/// effect through catalog or directory-scoped loading.
 #[derive(Debug, Deserialize)]
 struct AssetLock {
     gltf_path: String,
@@ -54,7 +54,7 @@ struct AssetLock {
     byte_size: u64,
 }
 
-/// Failure modes for [`load_character_config`]. Every variant carries the
+/// Failure modes for character contract loading. Every variant carries the
 /// actionable value or path involved so a failure can be diagnosed without
 /// re-running the loader under a debugger.
 #[derive(Debug, Error)]
@@ -289,19 +289,6 @@ fn validate_digest(path: &Path, value: &str) -> Result<(), ConfigError> {
             length: value.chars().count(),
         })
     }
-}
-
-/// Loads and fully validates the humanoid character contract rooted at
-/// `asset_root` (the Bevy asset directory, e.g. `assets/`).
-///
-/// This reads `character.ron` and `asset.lock.ron` from their fixed relative
-/// locations, validates every semantic field, confirms the declared license
-/// file exists, is non-empty, and canonically resolves inside `asset_root`,
-/// confirms the lock's `gltf_path` matches the manifest's and carries a
-/// well-formed digest, and re-hashes the actual GLB to confirm its byte size
-/// and SHA-256 match the lock. No Bevy asset loading happens here.
-pub fn load_character_config(asset_root: &Path) -> Result<CharacterConfig, ConfigError> {
-    load_character_config_from(asset_root, Path::new(DEFAULT_CHARACTER_DIR))
 }
 
 /// Loads every character that the runtime promises can be selected.

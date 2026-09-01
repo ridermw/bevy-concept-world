@@ -353,9 +353,7 @@ impl Plugin for CharacterPlugin {
             )
             .add_systems(
                 Update,
-                poll_validating
-                    .run_if(in_state(PrototypeState::Validating))
-                    .run_if(resource_exists::<ValidatingStartedAt>),
+                poll_validating.run_if(in_state(PrototypeState::Validating)),
             );
     }
 }
@@ -761,6 +759,7 @@ pub fn spawn_character(
             Humanoid,
             HumanoidController::default(),
             Transform::IDENTITY,
+            Visibility::Inherited,
         ))
         .id();
 
@@ -801,7 +800,7 @@ pub fn spawn_character(
 /// Fails the run if the spawned world instance never becomes ready. Without
 /// this the application would sit in `Validating` forever, looking healthy.
 fn poll_validating(
-    started_at: Res<ValidatingStartedAt>,
+    started_at: Option<Res<ValidatingStartedAt>>,
     real: Res<Time<Real>>,
     catalog: Res<CharacterCatalog>,
     readiness: Res<VariantReadiness>,
@@ -812,6 +811,19 @@ fn poll_validating(
     if *reported {
         return;
     }
+    let Some(started_at) = started_at else {
+        *reported = true;
+        fail(
+            &mut next_state,
+            &mut report,
+            "Character validation watchdog has no start marker",
+            vec![
+                "Validating was entered without recording its wall-clock start time".to_string(),
+                "the runtime cannot enforce the spawned-scene readiness timeout".to_string(),
+            ],
+        );
+        return;
+    };
     let elapsed = real.elapsed().saturating_sub(started_at.0);
     if !timed_out(elapsed, VALIDATING_TIMEOUT) {
         return;

@@ -76,6 +76,10 @@ def finish_mesh(
         modifier.width = bevel
         modifier.segments = 1
         bpy.ops.object.modifier_apply(modifier=modifier.name)
+    # These solid-color modules do not use textures. Removing generated UVs
+    # also avoids run-to-run float noise from Blender's bevel UV interpolation.
+    while obj.data.uv_layers:
+        obj.data.uv_layers.remove(obj.data.uv_layers[0])
     for polygon in obj.data.polygons:
         polygon.use_smooth = False
     world = obj.matrix_world.copy()

@@ -380,6 +380,7 @@ fn update_overlay(
 }
 
 /// Applies keyboard intents without respawning or resetting character state.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_controls(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
