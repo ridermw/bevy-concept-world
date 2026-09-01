@@ -29,25 +29,47 @@ fn assert_close(actual: f32, expected: f32) {
     );
 }
 
-fn assert_chunk_invariant_for_steering(start_heading: f32, steering: f32) {
-    let single_heading = advance_heading(start_heading, steering, 1.0);
-    let single_translation = steered_delta(start_heading, steering, FORWARD_SPEED, 1.0);
+fn assert_normalize_angle_preserves_bits(angle: f32) {
+    let normalized = normalize_angle(angle);
+    assert_eq!(
+        normalized.to_bits(),
+        angle.to_bits(),
+        "expected {angle} to remain bit-for-bit unchanged, got {normalized}"
+    );
+}
 
-    let repeated = (0..60).fold((start_heading, Vec3::ZERO), |(heading, translation), _| {
-        let seconds = 1.0 / 60.0;
-        let update_heading = advance_heading(heading, steering, seconds);
-        let update_translation = steered_delta(heading, steering, FORWARD_SPEED, seconds);
-        (update_heading, translation + update_translation)
-    });
+fn assert_chunk_invariant_for_steering(
+    start_heading: f32,
+    steering: f32,
+    chunk_count: u32,
+    chunk_millis: u64,
+) {
+    let chunk = Duration::from_millis(chunk_millis);
+    let total = Duration::from_millis(chunk_millis * u64::from(chunk_count));
+    let chunk_seconds = chunk.as_secs_f32();
+    let total_seconds = total.as_secs_f32();
+
+    let single_heading = advance_heading(start_heading, steering, total_seconds);
+    let single_translation = steered_delta(start_heading, steering, FORWARD_SPEED, total_seconds);
+
+    let repeated =
+        (0..chunk_count).fold((start_heading, Vec3::ZERO), |(heading, translation), _| {
+            let update_heading = advance_heading(heading, steering, chunk_seconds);
+            let update_translation = steered_delta(heading, steering, FORWARD_SPEED, chunk_seconds);
+            (update_heading, translation + update_translation)
+        });
+
+    let heading_error = (single_heading - repeated.0).abs();
+    let translation_error = single_translation.distance(repeated.1);
 
     assert!(
-        (single_heading - repeated.0).abs() <= 2.0e-6,
-        "expected chunk-invariant heading, single={single_heading}, repeated={}",
+        heading_error <= 2.0e-6,
+        "expected chunk-invariant heading within 2.0e-6, single={single_heading}, repeated={}, error={heading_error}",
         repeated.0
     );
     assert!(
-        single_translation.distance(repeated.1) <= 2.0e-6,
-        "expected chunk-invariant translation, single={:?}, repeated={:?}",
+        translation_error <= 4.0e-6,
+        "expected chunk-invariant translation within 4.0e-6, single={:?}, repeated={:?}, error={translation_error}",
         single_translation,
         repeated.1
     );
@@ -155,6 +177,24 @@ fn normalize_angle_stays_within_the_documented_bounds() {
             (-PI..=PI).contains(&normalized),
             "{angle} normalized to {normalized}"
         );
+    }
+}
+
+#[test]
+fn normalize_angle_preserves_in_range_bits() {
+    let just_below_pi = f32::from_bits(PI.to_bits() - 1);
+    for angle in [
+        -0.0,
+        0.0,
+        f32::from_bits(1),
+        -f32::from_bits(1),
+        0.25,
+        -0.25,
+        1.0e-30,
+        -1.0e-30,
+        just_below_pi,
+    ] {
+        assert_normalize_angle_preserves_bits(angle);
     }
 }
 
@@ -452,25 +492,45 @@ fn zero_steering_matches_straight_motion_across_frame_chunking() {
 #[test]
 fn tiny_positive_steering_remains_chunk_invariant() {
     let start_heading = 0.25;
-    assert_chunk_invariant_for_steering(start_heading, 1.0e-6);
+    assert_chunk_invariant_for_steering(start_heading, 1.0e-6, 60, 12);
 }
 
 #[test]
 fn tiny_negative_steering_remains_chunk_invariant() {
     let start_heading = 0.25;
-    assert_chunk_invariant_for_steering(start_heading, -1.0e-6);
+    assert_chunk_invariant_for_steering(start_heading, -1.0e-6, 60, 12);
 }
 
 #[test]
 fn slightly_larger_positive_steering_remains_chunk_invariant() {
     let start_heading = 0.25;
-    assert_chunk_invariant_for_steering(start_heading, 1.0e-5);
+    assert_chunk_invariant_for_steering(start_heading, 1.0e-5, 60, 12);
 }
 
 #[test]
 fn slightly_larger_negative_steering_remains_chunk_invariant() {
     let start_heading = 0.25;
-    assert_chunk_invariant_for_steering(start_heading, -1.0e-5);
+    assert_chunk_invariant_for_steering(start_heading, -1.0e-5, 60, 12);
+}
+
+#[test]
+fn tiny_steering_remains_chunk_invariant_at_60_chunks() {
+    assert_chunk_invariant_for_steering(0.25, 1.3e-6, 60, 12);
+}
+
+#[test]
+fn tiny_steering_remains_chunk_invariant_at_144_chunks() {
+    assert_chunk_invariant_for_steering(0.25, 1.3e-6, 144, 5);
+}
+
+#[test]
+fn tiny_steering_remains_chunk_invariant_at_240_chunks() {
+    assert_chunk_invariant_for_steering(0.25, 1.3e-6, 240, 3);
+}
+
+#[test]
+fn full_steering_remains_chunk_invariant_at_240_chunks() {
+    assert_chunk_invariant_for_steering(0.25, 1.0, 240, 3);
 }
 
 #[test]

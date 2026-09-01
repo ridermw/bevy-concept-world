@@ -41,7 +41,7 @@ pub struct MovementUpdate {
     pub turning_around: bool,
 }
 
-/// Normalizes an angle into the `[-PI, PI]` range.
+/// Normalizes an angle into the `[-PI, PI)` range.
 ///
 /// The contract is finite input only; non-finite values are a programmer
 /// error and are rejected loudly.
@@ -50,6 +50,9 @@ pub fn normalize_angle(angle: f32) -> f32 {
         angle.is_finite(),
         "normalize_angle requires finite input, got {angle}"
     );
+    if (-PI..PI).contains(&angle) {
+        return angle;
+    }
     (angle + PI).rem_euclid(TAU) - PI
 }
 
