@@ -197,6 +197,28 @@ pub fn control_help_lines() -> [&'static str; 2] {
     CONTROL_HELP_LINES
 }
 
+/// The actions the controls system should perform this frame.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ControlIntents {
+    /// Exit the app with the given code.
+    pub exit: Option<AppExit>,
+    /// Toggle pause on every animation player.
+    pub toggle_pause: bool,
+    /// Request a screenshot from the primary window.
+    pub screenshot: bool,
+}
+
+/// Interprets the control keys from the current frame.
+pub fn control_intents(keys: &ButtonInput<KeyCode>, state: PrototypeState) -> ControlIntents {
+    ControlIntents {
+        exit: keys
+            .just_pressed(KeyCode::Escape)
+            .then(|| escape_exit(state)),
+        toggle_pause: keys.just_pressed(KeyCode::Space),
+        screenshot: keys.just_pressed(KeyCode::KeyP),
+    }
+}
+
 /// The capture target. Kept relative to the working directory so a scripted
 /// run writes into the repository it was launched from.
 pub fn screenshot_path() -> PathBuf {
@@ -329,11 +351,13 @@ fn handle_controls(
     mut players: Query<&mut AnimationPlayer>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if keys.just_pressed(KeyCode::Escape) {
-        exit.write(escape_exit(*state.get()));
+    let intents = control_intents(&keys, *state.get());
+
+    if let Some(app_exit) = intents.exit {
+        exit.write(app_exit);
     }
 
-    if keys.just_pressed(KeyCode::Space) {
+    if intents.toggle_pause {
         for mut player in &mut players {
             if player.all_paused() {
                 player.resume_all();
@@ -343,7 +367,7 @@ fn handle_controls(
         }
     }
 
-    if keys.just_pressed(KeyCode::KeyP) {
+    if intents.screenshot {
         let path = screenshot_path();
         if let Err(error) = prepare_capture_target(&path) {
             error!("cannot capture screenshot: {error}");

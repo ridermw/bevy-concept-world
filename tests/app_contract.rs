@@ -8,15 +8,24 @@
 
 use std::{fs, path::Path};
 
-use bevy::prelude::Vec3;
+use bevy::{
+    app::{App, AppExit},
+    input::ButtonInput,
+    prelude::{KeyCode, Vec3},
+};
 use bevy_concept_world::{
+    add_runtime_plugins,
     character::{
-        DiscoveredGltf, SelectionError, character_transform, validate_animation_players,
-        validate_named_assets,
+        CharacterPlugin, DiscoveredGltf, SelectionError, character_transform,
+        validate_animation_players, validate_named_assets,
     },
     config::load_character_config,
-    diagnostics::control_help_lines,
+    diagnostics::{ControlIntents, DiagnosticsPlugin, control_help_lines, control_intents},
+    inspection::InspectionPlugin,
+    locomotion::LocomotionPlugin,
+    perf::PerformancePlugin,
     state::FailureReport,
+    state::PrototypeState,
 };
 
 fn discovered(scenes: &[&str], animations: &[&str]) -> DiscoveredGltf {
@@ -24,6 +33,12 @@ fn discovered(scenes: &[&str], animations: &[&str]) -> DiscoveredGltf {
         scenes: scenes.iter().map(|name| (*name).to_string()).collect(),
         animations: animations.iter().map(|name| (*name).to_string()).collect(),
     }
+}
+
+fn pressed(key: KeyCode) -> ButtonInput<KeyCode> {
+    let mut keys = ButtonInput::default();
+    keys.press(key);
+    keys
 }
 
 // --- exact named-asset matching -------------------------------------------
@@ -308,17 +323,65 @@ fn the_overlay_exposes_the_updated_control_help_lines() {
 }
 
 #[test]
-fn main_still_registers_the_locomotion_plugin() {
-    let main_rs = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"));
+fn escape_maps_to_a_success_exit_while_the_run_is_healthy() {
+    let keys = pressed(KeyCode::Escape);
 
-    assert!(main_rs.contains("LocomotionPlugin"), "{main_rs}");
+    assert_eq!(
+        control_intents(&keys, PrototypeState::Running),
+        ControlIntents {
+            exit: Some(AppExit::Success),
+            ..Default::default()
+        }
+    );
 }
 
 #[test]
-fn legacy_space_p_and_escape_handling_remains_in_the_controls_system() {
-    let diagnostics = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/diagnostics.rs"));
+fn escape_maps_to_an_error_exit_after_a_failed_run() {
+    let keys = pressed(KeyCode::Escape);
 
-    assert!(diagnostics.contains("KeyCode::Space"), "{diagnostics}");
-    assert!(diagnostics.contains("KeyCode::KeyP"), "{diagnostics}");
-    assert!(diagnostics.contains("KeyCode::Escape"), "{diagnostics}");
+    assert_eq!(
+        control_intents(&keys, PrototypeState::Failed),
+        ControlIntents {
+            exit: Some(AppExit::error()),
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn space_maps_to_a_pause_toggle_intent() {
+    let keys = pressed(KeyCode::Space);
+
+    assert_eq!(
+        control_intents(&keys, PrototypeState::Running),
+        ControlIntents {
+            toggle_pause: true,
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn p_maps_to_a_screenshot_intent() {
+    let keys = pressed(KeyCode::KeyP);
+
+    assert_eq!(
+        control_intents(&keys, PrototypeState::Running),
+        ControlIntents {
+            screenshot: true,
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn runtime_plugin_configuration_registers_the_core_runtime_plugins() {
+    let mut app = App::new();
+    add_runtime_plugins(&mut app, DiagnosticsPlugin::attended());
+
+    assert!(app.is_plugin_added::<InspectionPlugin>());
+    assert!(app.is_plugin_added::<CharacterPlugin>());
+    assert!(app.is_plugin_added::<LocomotionPlugin>());
+    assert!(app.is_plugin_added::<DiagnosticsPlugin>());
+    assert!(app.is_plugin_added::<PerformancePlugin>());
 }

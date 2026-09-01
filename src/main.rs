@@ -18,13 +18,9 @@ use std::{path::PathBuf, time::Duration};
 
 use bevy::{asset::AssetPlugin, prelude::*};
 use bevy_concept_world::{
-    AssetRoot,
-    character::CharacterPlugin,
+    AssetRoot, add_runtime_plugins,
     config::load_character_config,
     diagnostics::{DiagnosticsPlugin, capture_seconds_from_env},
-    inspection::InspectionPlugin,
-    locomotion::LocomotionPlugin,
-    perf::PerformancePlugin,
     resolve_asset_root,
     state::{FailureReport, PrototypeState},
 };
@@ -74,15 +70,8 @@ fn main() -> AppExit {
                 }),
                 ..default()
             }),
-    )
-    .add_plugins((
-        InspectionPlugin,
-        CharacterPlugin,
-        LocomotionPlugin,
-        diagnostics,
-        PerformancePlugin,
-    ))
-    .init_resource::<FailureReport>();
+    );
+    add_runtime_plugins(&mut app, diagnostics).init_resource::<FailureReport>();
 
     let failure = match (&capture, &asset_root, config) {
         (Err(error), _, _) => Some(("Unattended capture request is invalid", error.to_string())),

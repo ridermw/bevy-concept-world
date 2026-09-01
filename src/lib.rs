@@ -1,6 +1,8 @@
 //! Prototype modules, exported so integration tests can exercise the pure
 //! contract logic without starting a Bevy application.
 
+use bevy::prelude::App;
+
 pub mod character;
 pub mod config;
 pub mod diagnostics;
@@ -11,6 +13,11 @@ pub mod state;
 
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+use crate::{
+    character::CharacterPlugin, diagnostics::DiagnosticsPlugin, inspection::InspectionPlugin,
+    locomotion::LocomotionPlugin, perf::PerformancePlugin,
+};
 
 /// Overrides asset-root discovery entirely. Set it to the directory that
 /// *is* the Bevy asset root (the one containing `characters/`), not to its
@@ -150,4 +157,15 @@ pub fn resolve_asset_root() -> Result<AssetRoot, AssetRootError> {
         executable.as_deref(),
         &|path| path.is_dir(),
     )
+}
+
+/// Registers the prototype's runtime plugins in their production order.
+pub fn add_runtime_plugins(app: &mut App, diagnostics: DiagnosticsPlugin) -> &mut App {
+    app.add_plugins((
+        InspectionPlugin,
+        CharacterPlugin,
+        LocomotionPlugin,
+        diagnostics,
+        PerformancePlugin,
+    ))
 }
