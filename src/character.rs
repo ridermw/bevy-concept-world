@@ -27,6 +27,7 @@ use thiserror::Error;
 
 use crate::{
     config::CharacterConfig,
+    locomotion::HumanoidController,
     state::{FailureReport, PrototypeState, fail},
 };
 
@@ -207,6 +208,10 @@ pub fn character_transform(scale: f32, yaw_degrees: f32) -> Transform {
 /// Loads the manifest's glTF, validates it against the manifest, spawns it,
 /// and loops the named walk clip on every discovered `AnimationPlayer`.
 pub struct CharacterPlugin;
+
+/// Marks the validated humanoid root so runtime systems can target it.
+#[derive(Component)]
+pub struct Humanoid;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
@@ -476,6 +481,8 @@ fn spawn_character(
     commands
         .spawn((
             Name::new("Humanoid"),
+            Humanoid,
+            HumanoidController::default(),
             bevy::world_serialization::WorldAssetRoot(prepared.scene.clone()),
             character_transform(config.scale, config.yaw_degrees),
             PendingCharacter {

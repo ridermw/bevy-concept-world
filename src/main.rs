@@ -23,6 +23,7 @@ use bevy_concept_world::{
     config::load_character_config,
     diagnostics::{DiagnosticsPlugin, capture_seconds_from_env},
     inspection::InspectionPlugin,
+    locomotion::LocomotionPlugin,
     perf::PerformancePlugin,
     resolve_asset_root,
     state::{FailureReport, PrototypeState},
@@ -77,6 +78,7 @@ fn main() -> AppExit {
     .add_plugins((
         InspectionPlugin,
         CharacterPlugin,
+        LocomotionPlugin,
         diagnostics,
         PerformancePlugin,
     ))

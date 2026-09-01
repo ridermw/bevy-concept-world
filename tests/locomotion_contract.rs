@@ -3,8 +3,16 @@ use std::{
     time::Duration,
 };
 
-use bevy::prelude::{Quat, Vec3};
-use bevy_concept_world::locomotion::{Turnaround, advance_heading, forward_delta, normalize_angle};
+use bevy::{prelude::*, state::app::StatesPlugin, time::TimeUpdateStrategy};
+use bevy_concept_world::{
+    character::{Humanoid, character_transform},
+    config::CharacterConfig,
+    locomotion::{
+        FORWARD_SPEED, HumanoidController, LocomotionPlugin, MovementInput, Turnaround,
+        advance_heading, forward_delta, movement_input_from_keys, normalize_angle,
+    },
+    state::PrototypeState,
+};
 
 fn assert_vec3_close(actual: Vec3, expected: Vec3) {
     assert!(
@@ -18,6 +26,51 @@ fn assert_close(actual: f32, expected: f32) {
         (actual - expected).abs() <= 1e-6,
         "expected {expected}, got {actual}"
     );
+}
+
+fn assert_rotation_close(actual: Quat, expected: Quat) {
+    assert_vec3_close(actual * Vec3::X, expected * Vec3::X);
+    assert_vec3_close(actual * Vec3::Y, expected * Vec3::Y);
+    assert_vec3_close(actual * Vec3::Z, expected * Vec3::Z);
+}
+
+fn test_character_config() -> CharacterConfig {
+    CharacterConfig {
+        id: "test-humanoid".into(),
+        gltf_path: "characters/quaternius/humanoid.glb".into(),
+        source_url: "https://example.invalid/humanoid".into(),
+        pack_version: "test".into(),
+        downloaded_on: "2026-09-01".into(),
+        license: "CC0".into(),
+        license_path: "characters/quaternius/LICENSE.txt".into(),
+        scene_name: "Scene".into(),
+        animation_name: "Walk_Loop".into(),
+        expected_animation_players: 1,
+        scale: 0.5,
+        yaw_degrees: 180.0,
+        root_motion: false,
+    }
+}
+
+fn locomotion_app(initial_state: PrototypeState) -> App {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .add_plugins(StatesPlugin)
+        .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            250,
+        )))
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(test_character_config())
+        .add_plugins(LocomotionPlugin)
+        .insert_state(initial_state);
+    app
+}
+
+fn enter(app: &mut App, state: PrototypeState) {
+    app.world_mut()
+        .resource_mut::<NextState<PrototypeState>>()
+        .set(state);
+    app.update();
 }
 
 #[test]
@@ -112,4 +165,254 @@ fn heading_advance_is_frame_rate_independent() {
     let ten_steps = (0..10).fold(start, |heading, _| advance_heading(heading, steering, 0.1));
 
     assert_close(one_step, ten_steps);
+}
+
+#[test]
+fn down_starts_only_one_turnaround_until_it_finishes() {
+    let mut controller = HumanoidController::default();
+    controller.update(
+        MovementInput {
+            turnaround_pressed: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::ZERO,
+    );
+    let first = controller
+        .turnaround()
+        .expect("the first Down press must start a turnaround");
+
+    controller.update(
+        MovementInput {
+            turnaround_pressed: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::ZERO,
+    );
+    assert_eq!(controller.turnaround(), Some(first));
+
+    let completed = controller.update(
+        MovementInput {
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(750),
+    );
+    assert!(!completed.turning_around);
+    assert!(controller.turnaround().is_none());
+
+    let after = controller.update(
+        MovementInput {
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(125),
+    );
+    assert_eq!(after.translation, Vec3::ZERO);
+    assert!(controller.turnaround().is_none());
+}
+
+#[test]
+fn releasing_down_stops_translation_without_cancelling_the_turn() {
+    let mut controller = HumanoidController::default();
+    controller.update(
+        MovementInput {
+            turnaround_pressed: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(100),
+    );
+
+    let update = controller.update(MovementInput::default(), Duration::from_millis(100));
+
+    assert_eq!(update.translation, Vec3::ZERO);
+    assert!(update.turning_around);
+    assert!(controller.turnaround().is_some());
+}
+
+#[test]
+fn left_and_right_mapping_are_symmetric_and_cancel_when_both_are_held() {
+    let mut up = ButtonInput::<KeyCode>::default();
+    up.press(KeyCode::ArrowUp);
+    let up = movement_input_from_keys(&up);
+
+    let mut left = ButtonInput::<KeyCode>::default();
+    left.press(KeyCode::ArrowLeft);
+    let left = movement_input_from_keys(&left);
+
+    let mut right = ButtonInput::<KeyCode>::default();
+    right.press(KeyCode::ArrowRight);
+    let right = movement_input_from_keys(&right);
+
+    let mut both = ButtonInput::<KeyCode>::default();
+    both.press(KeyCode::ArrowLeft);
+    both.press(KeyCode::ArrowRight);
+    let both = movement_input_from_keys(&both);
+
+    assert!(up.forward);
+    assert_close(up.steering, 0.0);
+
+    assert!(left.forward);
+    assert!(right.forward);
+    assert!(both.forward);
+    assert_close(left.steering.abs(), 1.0);
+    assert_close(right.steering.abs(), 1.0);
+    assert_close(left.steering, -right.steering);
+    assert_close(both.steering, 0.0);
+}
+
+#[test]
+fn normal_forward_motion_advances_heading_and_translation_at_forward_speed() {
+    let mut controller = HumanoidController::default();
+
+    let update = controller.update(
+        MovementInput {
+            forward: true,
+            steering: 1.0,
+            ..default()
+        },
+        Duration::from_secs(1),
+    );
+
+    assert_close(update.heading, FRAC_PI_2);
+    assert_vec3_close(
+        update.translation,
+        forward_delta(FRAC_PI_2, FORWARD_SPEED, 1.0),
+    );
+    assert!(!update.turning_around);
+    assert_close(controller.heading(), FRAC_PI_2);
+}
+
+#[test]
+fn active_turnarounds_ignore_normal_steering() {
+    let mut controller = HumanoidController::default();
+    controller.update(
+        MovementInput {
+            turnaround_pressed: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(100),
+    );
+
+    let mut steer_left = controller;
+    let mut steer_right = controller;
+
+    let left = steer_left.update(
+        MovementInput {
+            forward: true,
+            steering: -1.0,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(125),
+    );
+    let right = steer_right.update(
+        MovementInput {
+            forward: true,
+            steering: 1.0,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(125),
+    );
+
+    assert_close(left.heading, right.heading);
+    assert_vec3_close(left.translation, right.translation);
+    assert_eq!(steer_left.turnaround(), steer_right.turnaround());
+}
+
+#[test]
+fn turnaround_translation_is_frame_rate_independent_while_down_is_held() {
+    let mut single_step = HumanoidController::default();
+    let single = single_step.update(
+        MovementInput {
+            turnaround_pressed: true,
+            turnaround_held: true,
+            ..default()
+        },
+        Duration::from_millis(750),
+    );
+
+    let mut repeated = HumanoidController::default();
+    let stepped = (0..10).fold(Vec3::ZERO, |translation, step| {
+        let update = repeated.update(
+            MovementInput {
+                turnaround_pressed: step == 0,
+                turnaround_held: true,
+                ..default()
+            },
+            Duration::from_millis(75),
+        );
+        translation + update.translation
+    });
+
+    assert_vec3_close(single.translation, stepped);
+}
+
+#[test]
+fn transforms_change_only_while_running() {
+    let mut app = locomotion_app(PrototypeState::Loading);
+    let base = character_transform(0.5, 180.0);
+    let untouched = Transform::from_xyz(3.0, 2.0, 1.0);
+    let humanoid = app
+        .world_mut()
+        .spawn((
+            Humanoid,
+            HumanoidController::default(),
+            base,
+            GlobalTransform::default(),
+        ))
+        .id();
+    let untouched_entity = app
+        .world_mut()
+        .spawn((untouched, GlobalTransform::default()))
+        .id();
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<KeyCode>>()
+        .press(KeyCode::ArrowLeft);
+
+    app.update();
+
+    let loading_transform = app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .cloned()
+        .expect("humanoid root must still have a transform");
+    assert_eq!(loading_transform, base);
+
+    enter(&mut app, PrototypeState::Running);
+    app.update();
+
+    let running_transform = app
+        .world()
+        .entity(humanoid)
+        .get::<Transform>()
+        .cloned()
+        .expect("humanoid root must still have a transform");
+    let controller = app
+        .world()
+        .entity(humanoid)
+        .get::<HumanoidController>()
+        .expect("the locomotion system must keep the controller on the humanoid");
+
+    assert_ne!(running_transform.translation, base.translation);
+    assert_ne!(running_transform.rotation, base.rotation);
+    assert_eq!(running_transform.scale, base.scale);
+    assert_rotation_close(
+        running_transform.rotation,
+        Quat::from_rotation_y(controller.heading()) * base.rotation,
+    );
+
+    let untouched_after = app
+        .world()
+        .entity(untouched_entity)
+        .get::<Transform>()
+        .cloned()
+        .expect("unrelated transforms must remain readable");
+    assert_eq!(untouched_after, untouched);
 }
