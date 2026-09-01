@@ -167,7 +167,7 @@ Quaternius reference: ready, players 1/1
 Midcreek technician - man: ready, players 1/1
 Animation players: 2 (2 with an animation graph)
   clip 1.33s  speed 1.00x  playing
-clip 1.33s  speed 1.00x  playing
+  clip 1.33s  speed 1.00x  playing
 Arrows: walk/steer/turn around   Q/E: orbit   Wheel: zoom
 Tab: switch model   Space: pause/resume
 P: screenshot   Esc: exit

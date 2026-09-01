@@ -123,9 +123,11 @@ cargo test --test app_contract `
 
 - The visible body and equipment are low-detail rigid modules parented to
   bones, not production topology with final skin weights.
-- The source Quaternius mesh remains tiny and below the scene as the hidden
-  skinned contract mesh that causes Bevy to instantiate the expected
-  `AnimationPlayer`.
+- The source Quaternius mesh is reduced to millimeter scale and offset below
+  the rest-pose scene as the hidden skinned contract mesh that causes Bevy to
+  instantiate the expected `AnimationPlayer`. Its inherited skinning can move
+  its dynamic bounds during animation, but the geometry remains sub-pixel from
+  the prototype camera.
 - The GLB retains the source animation library; the runtime contract selects
   only `Walk_Loop`.
 - Materials are flat solid colors with no texture workflow. Unused generated

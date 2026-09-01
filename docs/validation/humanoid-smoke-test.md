@@ -58,7 +58,8 @@ both glTFs match their manifests; entering Validating
 spawned both character scenes; validating their hierarchies
 prototype state: Some(Loading) -> Some(Validating)
 Quaternius reference hierarchy validated; waiting for the other variant
-both character walk loops started in phase
+both character walk loops started at phase zero with a shared 1.3333s cycle
+  (reference 1.0000x, technician 1.0000x)
 prototype state: Some(Validating) -> Some(Running)
 unattended capture verified: docs/validation/humanoid-walk.png (232688 bytes);
   exiting
