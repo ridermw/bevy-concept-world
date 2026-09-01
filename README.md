@@ -23,14 +23,17 @@ A staged prototype for bringing concept-driven humanoid characters into a 3D Bev
       and a nonzero exit for every failure path. Each failure path was exercised against the
       release binary; the results are in
       [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md).
-- [ ] Visual gate: Confirm on screen that the humanoid is upright, correctly scaled,
-      facing the forward marker, and deforming cleanly through the walk loop.
+- [ ] Visual gate: Confirm the humanoid on screen. The committed screenshot can only settle the
+      static criteria — upright, correctly scaled, facing the forward marker, limbs intact.
+      Gait advancement, a clean loop seam, and pause/resume must be confirmed by watching the
+      live window and writing the observation down.
       *(blocked — this host has no GPU; wgpu falls back to a software rasterizer that
       renders no 3D geometry and then times out)*
 - [ ] Performance baseline: startup time, steady-state frame time, entity count, mesh and
-      material count, and decoded texture bytes. *(deferred — see
-      [Performance baseline](#performance-baseline); these numbers are not meaningful until
-      a GPU-backed 3D render succeeds)*
+      material count, and decoded texture bytes. *(instrumented and ready to read; **not yet
+      measured** — see [Performance baseline](#performance-baseline). The binary now logs every
+      one of these numbers itself, so the GPU-host run only has to be started and its log
+      read)*
 - [ ] Replace the reference mesh with the first concept-art-derived mesh.
 
 The humanoid runtime is implemented and its asset contract is verified end to end against
@@ -64,6 +67,10 @@ The on-screen overlay reports the runtime state, the asset, the selected scene a
 number of animation players discovered in the spawned scene *and* how many of them were wired
 to an animation graph, the clip duration and playback speed, and the full detail of any fatal
 failure.
+
+The log carries the performance numbers: one `performance baseline:` line on reaching
+`Running`, and a filtered `frame_time` / `fps` line every five seconds. See
+[Performance baseline](#performance-baseline).
 
 ### Where the assets come from
 
@@ -102,16 +109,17 @@ actionable report.
 
 ## Closing the visual gate on a GPU host
 
-Everything except the on-screen check is verified. To close the last gate, clone or copy this
-checkout onto a machine with a GPU-accelerated desktop session and run, **from the repository
-root**:
+Everything except the on-screen check is verified, and the performance numbers are
+instrumented but unmeasured. To close both, clone or copy this checkout onto a machine with a
+GPU-accelerated desktop session and run, **from the repository root**:
 
 ```powershell
 cd <path-to>\bevy-concept-world
 cargo run --release
 ```
 
-Wait for the overlay to read `State: Running`, which should look exactly like this:
+Wait for the overlay to read `State: Running`. Compare the content of each line, not its exact
+spacing:
 
 ```
 State: Running
@@ -127,26 +135,96 @@ directory, so run it from the repository root — from the fixed inspection came
 `Space` once to confirm the overlay flips to `paused` and the pose freezes, press it again to
 confirm it resumes, then press `Esc` (exit code `0` from `Running`).
 
-The captured image must show all seven of the criteria listed under
+**The PNG and the live window prove different things, and the difference matters.** A single
+still frame can only show the static criteria — upright posture, scale against the one-meter
+marker, facing along the `-Z` marker, no collapsed or detached limbs, a stationary root. It
+cannot show gait advancement, a clean loop seam, or that `Space` pauses and resumes, because
+each of those is a statement about *change over time*. Those three must be confirmed by
+watching the running window, and the observation written down; the committed image is not
+evidence for them. The full split is in
 [*Remaining work to close the visual gate*](docs/validation/humanoid-smoke-test.md#remaining-work-to-close-the-visual-gate).
-Commit the image and record the result there.
+Commit the image and record both the still-frame result and the live observation there.
 
 ## Performance baseline
 
-**Deferred, deliberately not estimated.** The design asks for debug and release startup time,
+**Instrumented, not yet measured.** The design asks for debug and release startup time,
 steady-state frame time for one humanoid, entity count, mesh and material count, and the sum of
-decoded texture bytes for the humanoid scene.
+decoded texture bytes for the humanoid scene. The binary now reports all of them itself, so the
+GPU-host session does not have to instrument anything: it only has to run the binary and read
+the log.
 
-None of those numbers can be taken on this validation host. wgpu selects the "Microsoft Basic
-Render Driver" software rasterizer here, where the PBR pass produces no geometry, a single
-frame can take seconds, and process teardown took roughly eight minutes of wall clock. Timings
-measured against that adapter would describe the software rasterizer, not the prototype, and
-the asset-derived counts — meshes, materials, decoded texture bytes — cannot be trusted from a
-render path that never draws the mesh. Publishing them would be worse than publishing nothing,
-because they would look like a baseline for future custom meshes.
+**No values are claimed on this validation host.** wgpu selects the "Microsoft Basic Render
+Driver" software rasterizer here, where the PBR pass produces no geometry. Frame time measured
+on it ran from about 34 ms to about 68 ms average within ninety seconds of a single run and kept
+climbing, and a single screenshot readback took tens of seconds. Timings measured against that
+adapter would describe the software rasterizer, not the prototype, and the asset-derived counts
+cannot be trusted from a render path that never draws the mesh. Publishing them would be worse
+than publishing nothing, because they would look like a baseline for future custom meshes.
 
-These measurements are therefore taken in the same GPU-host session that closes the visual
-gate, and recorded in
+### Exact commands
+
+Startup timing is *not* separately timed by a stopwatch: the application measures it on
+`Time<Real>` from application startup to the frame that enters `Running`, and prints it. Run
+each profile once, from the repository root.
+
+Debug:
+
+```powershell
+cargo run
+```
+
+Release:
+
+```powershell
+cargo build --release
+.\target\release\bevy-concept-world.exe
+```
+
+Both are attended runs. Do **not** set `HUMANOID_WALK_CAPTURE_SECONDS` for a frame-time reading:
+an unattended run exits as soon as it has captured a frame, which is long before frame time has
+settled. Leave the window open for at least a minute, then press `Esc`.
+
+To keep only the two lines that matter:
+
+```powershell
+cargo run --release 2>&1 | Select-String -Pattern 'performance baseline|frame_time'
+```
+
+### Which log line carries which number
+
+| Number the design asks for | Log line |
+|---|---|
+| Startup time to `Running` (per profile) | `performance baseline: … startup_to_running=…s` |
+| Entity count | `performance baseline: … entities=…` |
+| Mesh count | `performance baseline: … meshes=…` |
+| Material count | `performance baseline: … standard_materials=…` |
+| Decoded texture bytes | `performance baseline: … decoded_image_bytes=<exact bytes> (<same value, binary-prefixed>)` |
+| Steady-state frame time | `frame_time:   64.024600ms (avg 34.483408ms)` — shape only, from the software host |
+| Frames per second | `fps       :   15.618996   (avg 36.942580)` — shape only, from the software host |
+
+The parenthesised size beside `decoded_image_bytes` scales its unit (`B`, `KiB`, `MiB`, `GiB`);
+the exact byte count is always printed beside it, so the unit is a reading aid, never the only
+record.
+
+The `performance baseline:` line is emitted **exactly once**, on entering `Running`, by
+`src/perf.rs`. It looks like this (the numbers below are placeholders, not measurements):
+
+```
+INFO bevy_concept_world::perf: performance baseline: startup_to_running=<s>s entities=<n> meshes=<n> standard_materials=<n> images=<n> decoded_image_bytes=<n> (<n> <unit>) images_without_cpu_data=<n>
+```
+
+`images_without_cpu_data` is the number of `Image` assets with no CPU-side data. Those
+contribute nothing to `decoded_image_bytes`, so the count is printed beside it rather than
+folded in as zero — otherwise the texture total could be silently understated.
+
+The `frame_time` and `fps` lines come from Bevy's own `FrameTimeDiagnosticsPlugin` and
+`LogDiagnosticsPlugin`, filtered to just those two diagnostics and throttled to one line every
+five seconds so they cannot bury the state and capture lines. They are logged under the
+`bevy_diagnostic` target and start from the first frame, so read the ones printed *after* the
+`performance baseline:` line — those are the steady-state numbers, and the `avg` column is the
+one to record.
+
+Record the resulting numbers in
 [`docs/validation/humanoid-smoke-test.md`](docs/validation/humanoid-smoke-test.md). They are a
 baseline for comparison against future concept-art meshes, not pass/fail targets, so nothing in
 this milestone is blocked on their values — only on their being real.
@@ -180,6 +258,7 @@ presented as success. In a scripted run — one where `HUMANOID_WALK_CAPTURE_SEC
 | `src/inspection.rs` | Fixed camera, ground, key light with shadows, ambient light, one-meter marker, `-Z` forward marker |
 | `src/character.rs` | Poll the real load states, validate the glTF's real names, spawn from `OnEnter(Validating)`, discover its real `AnimationPlayer`s, loop the clip |
 | `src/diagnostics.rs` | Status and failure overlay, pause/resume, screenshot, exit, and the verified unattended capture |
+| `src/perf.rs` | Filtered frame-time logging and the one-time `performance baseline:` line taken on entering `Running` |
 
 The four states are genuinely sequential. `Loading` polls
 `AssetServer::get_load_states` — the root asset, its direct dependencies, *and* its recursive
@@ -207,6 +286,7 @@ walking the spawned hierarchy. Both are checked by pure functions covered in
 | `tests/config_contract.rs` | Manifest and lock parsing, path safety, range checks, integrity re-hashing, against real temporary-directory fixtures |
 | `tests/app_contract.rs` | Exact named-asset matching, player-count validation, spawn transform, and the real checked-in GLB |
 | `tests/runtime_contract.rs` | Asset-root resolution, load-state evaluation and timeouts, capture-environment parsing, capture verification, exit codes, and two App/`World`-level tests over the real state machine and the real spawned-hierarchy walk |
+| `tests/perf_contract.rs` | Baseline byte and duration formatting, decoded-image accounting, and a real `App` asserting that frame-time diagnostics are registered and that the baseline is taken once, only on reaching `Running` |
 
 ## Manifest and integrity validation
 

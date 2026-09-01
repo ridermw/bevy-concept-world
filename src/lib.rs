@@ -5,6 +5,7 @@ pub mod character;
 pub mod config;
 pub mod diagnostics;
 pub mod inspection;
+pub mod perf;
 pub mod state;
 
 use std::path::{Path, PathBuf};

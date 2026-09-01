@@ -1,8 +1,11 @@
 # Humanoid walk smoke test
 
-- **Original run:** 2026-08-31
-- **Final verification:** 2026-09-01 (quality gate re-run; see
-  [Final verification](#final-verification--2026-09-01))
+- **Recorded session dates:** the entries below are grouped by the date each was
+  written down. Entries labelled 2026-08-31 are the initial runs; entries
+  labelled 2026-09-01 are the final quality-gate re-run. These are recorded
+  session dates only — they are not a claim about how much time passed between
+  them, and nothing here depends on an overnight interval. See
+  [Final verification](#final-verification--recorded-2026-09-01).
 - **Bevy:** 0.19.1 (pinned, `Cargo.lock` committed)
 - **Rust:** 1.98.0
 - **Asset:** Quaternius Universal Animation Library v3.0 Standard,
@@ -27,8 +30,10 @@
 | Unattended capture verified a non-empty file before exiting `0` | **PASSED** |
 | Every failure path observed exits nonzero | **PASSED** |
 | Asset root found from an unrelated working directory | **PASSED** |
-| Visual acceptance (upright, scale, facing, deformation, loop seam) | **NOT VERIFIED** |
-| Performance baseline (startup, frame time, entity/mesh/material/texture counts) | **DEFERRED** |
+| Visual acceptance — static criteria (upright, scale, facing, deformation) | **NOT VERIFIED** |
+| Visual acceptance — live criteria (gait advancement, loop seam, pause/resume) | **NOT VERIFIED** |
+| Performance baseline: the binary emits every required number | **PASSED** (instrumented) |
+| Performance baseline: the numbers themselves | **NOT MEASURED** (needs a GPU host) |
 
 ## Commands
 
@@ -46,7 +51,7 @@ $env:HUMANOID_WALK_CAPTURE_SECONDS = '3'
 .\target\release\bevy-concept-world.exe
 ```
 
-## Observed run — success (2026-08-31)
+## Observed run — success (recorded 2026-08-31)
 
 ```
 WARN bevy_render::renderer: The selected adapter is using a driver that only
@@ -79,7 +84,7 @@ scene and animation-graph handles and requests the transition, and the scene is
 spawned from `OnEnter(Validating)` in a later frame. Both transitions therefore
 appear in the log, in order.
 
-## Observed runs — failures (2026-08-31)
+## Observed runs — failures (recorded 2026-08-31)
 
 Each was produced by breaking one thing and running the same binary. Exit codes
 were read from the process, not from a shell pipeline.
@@ -162,22 +167,27 @@ exercised:
   into the temporary folder, whose `docs\validation\` directory the application
   created itself.
 
-## Final verification — 2026-09-01
+## Final verification — recorded 2026-09-01
 
 The full local quality gate was re-run from a clean working tree on the same
-host, in this order. Every command was run from the repository root.
+host, in this order. Every command was run from the repository root. "2026-09-01"
+is the date this entry was written down, not a claim that a night passed since
+the entries above.
 
 | Command | Result |
 |---|---|
 | `cargo fmt --check` | exit **0**, no diff |
 | `cargo clippy --all-targets -- -D warnings` | exit **0**, no warnings |
-| `cargo test` | exit **0** — **103 tests passed**, 0 failed, 0 ignored |
+| `cargo test` | exit **0** — **122 tests passed**, 0 failed, 0 ignored |
 | `cargo check --all-targets` | exit **0** |
 | `cargo build --release` then an unattended capture run | exit **0** |
 
 The test total is `tests/app_contract.rs` 20 + `tests/config_contract.rs` 48 +
-`tests/runtime_contract.rs` 35; the two unit-test binaries and the doc-test
-target contribute 0 each.
+`tests/perf_contract.rs` 19 + `tests/runtime_contract.rs` 35; the two unit-test
+binaries and the doc-test target contribute 0 each. The 19 `perf_contract`
+tests, and the `bevy_concept_world::perf` log line they cover, were added after
+the release capture run transcribed below; that run's transcript is reproduced
+unchanged, so it does not contain the baseline line.
 
 The unattended run used a bounded three-second delay, which is enough on this
 host because `Running` is reached in well under a second and the capture itself
@@ -188,9 +198,22 @@ $env:HUMANOID_WALK_CAPTURE_SECONDS = '3'
 .\target\release\bevy-concept-world.exe
 ```
 
-It reproduced the original run's state sequence. The output below is filtered
-to the state, capture, and character lines (the `spawned scene 'Scene'` line
-from the original transcript is not in this filter, not absent from the run):
+It reproduced the original run's state sequence. The transcript below is that
+run's output filtered to lines matching these three patterns:
+
+```
+bevy_concept_world::diagnostics
+bevy_concept_world::character
+bevy_render::renderer
+```
+
+An earlier transcription of this transcript omitted the
+`spawned scene 'Scene'` line and described it as "not in this filter". That was
+wrong: the line is logged under `bevy_concept_world::character` and therefore
+does match. It is restored to its correct position below — between the
+manifest-match line and the first `Validating` transition — which is where the
+2026-08-31 transcript above and a later debug run of the same binary both put
+it.
 
 ```
 WARN bevy_render::renderer: The selected adapter is using a driver that only
@@ -199,12 +222,17 @@ INFO bevy_concept_world::diagnostics: unattended capture enabled: 3s after reach
 INFO bevy_concept_world::character: loading character glTF: characters/quaternius/UAL1_Standard.glb
 INFO bevy_concept_world::diagnostics: prototype state: None -> Some(Loading)
 INFO bevy_concept_world::character: glTF matches the manifest (scene 'Scene', clip 'Walk_Loop'); entering Validating
+INFO bevy_concept_world::character: spawned scene 'Scene'; validating the spawned hierarchy
 INFO bevy_concept_world::diagnostics: prototype state: Some(Loading) -> Some(Validating)
 INFO bevy_concept_world::character: looping 'Walk_Loop' on the humanoid
 INFO bevy_concept_world::diagnostics: prototype state: Some(Validating) -> Some(Running)
 INFO bevy_concept_world::diagnostics: unattended capture: writing docs/validation/humanoid-walk.png
 INFO bevy_concept_world::diagnostics: unattended capture verified: docs/validation/humanoid-walk.png (63013 bytes); exiting
 ```
+
+(The `bevy_concept_world::perf` baseline line described under
+[Performance baseline](#performance-baseline--instrumented-not-measured-here)
+did not exist when this run was made, and is quoted from its own run there.)
 
 The written file was checked independently of the application: 63,013 bytes and
 the PNG signature `89 50 4e 47 0d 0a 1a 0a`, so it is a real, non-empty PNG.
@@ -220,50 +248,95 @@ containing a walking humanoid could not repeat exactly. So the capture proves
 the screenshot pipeline works and the run reached `Running`; it proves nothing
 about the render of the character.
 
+This run is also the one that **succeeded**: it wrote a verified, non-empty PNG
+and exited `0`. It should not be confused with the earlier, longer runs on this
+host that aborted inside wgpu or reported
+`We timed out while waiting on the last successful submission to complete!` from
+`wgpu-core`'s queue wait — those produced no verified capture at all. The
+distinction matters because the teardown cost below was measured on the
+*successful* run, after its screenshot was already written and verified.
+
 The process exited **0**, but only after 653 seconds of wall clock: 44 seconds
-from launch to the verified screenshot, and roughly ten minutes of wgpu teardown
-afterwards, with the application's own work already finished. That confirms the
-shutdown cost recorded below is reproducible, and is a further reason no timing
-baseline is taken from this adapter.
+from launch to the verified screenshot, and the remainder inside wgpu's
+teardown, with the application's own work already finished. Teardown on this
+adapter has been measured at roughly **8 to 10 minutes** across runs. That is
+a further reason no timing baseline is taken from this adapter.
 
 The file was therefore deleted from `docs/validation/humanoid-walk.png` rather
 than committed, and the evidence is kept only under the honest
 overlay-software-renderer name. **The visual gate is not claimed.**
 
-## Performance baseline — deferred
+## Performance baseline — instrumented, not measured here
 
 The design asks for debug and release startup time, steady-state frame time for
 one humanoid, entity count, mesh and material count, and the sum of decoded
-texture bytes for the humanoid scene. **None of these were measured, and none
-are estimated here.**
+texture bytes for the humanoid scene.
 
-They are deferred for one reason: on this host wgpu selects the "Microsoft Basic
-Render Driver" software rasterizer, and the PBR pass draws nothing. A baseline
-taken against that adapter would not describe the prototype:
+**The binary now measures and prints every one of them itself.** `src/perf.rs`
+adds Bevy's `FrameTimeDiagnosticsPlugin` and a `LogDiagnosticsPlugin` filtered
+to `frame_time` and `fps` at one line every five seconds, plus a single
+`performance baseline:` line emitted on entering `Running`. Nothing has to be
+instrumented, timed by hand, or estimated on the GPU host; the exact commands
+and the line-to-number mapping are in the README under
+[*Performance baseline*](../../README.md#performance-baseline).
 
-- **Startup and frame time** would measure a software rasterizer. The
-  capture-to-verification span above was roughly 41 seconds of wall clock for a
-  single readback, and process teardown afterwards runs for minutes inside
-  wgpu's queue wait. Those numbers say nothing about a GPU host.
-- **Entity count** could be read today, but on its own it is not the baseline
-  the design asked for, and quoting it beside four missing numbers would read
-  like partial success.
-- **Mesh, material, and decoded texture totals** come from what the render path
-  actually prepared. A path that never draws the skinned mesh is not a
-  trustworthy source for how much of the scene was really uploaded.
+**No baseline values are claimed from this host.** wgpu selects the "Microsoft
+Basic Render Driver" software rasterizer here and the PBR pass draws nothing, so:
+
+- **Startup and frame time** would measure a software rasterizer. Frame time on
+  this adapter is tens to hundreds of milliseconds and drifts steadily upward
+  over a single run. Those numbers say nothing about a GPU host.
+- **Entity, mesh, and material counts** come from a run in which the render path
+  never drew the skinned mesh, and **decoded texture bytes** describe what that
+  path happened to keep on the CPU side. They are not a trustworthy record of
+  how much of the scene a real adapter would upload.
 
 Publishing plausible-looking numbers from this host would be worse than
 publishing none, because they would be inherited as a comparison point for the
-concept-art meshes in the next milestone. These measurements are taken in the
-same GPU-host session that closes the visual gate, and recorded here. They are a
-baseline for future comparison, not pass/fail targets, so nothing in this
-milestone is blocked on their values — only on their being real.
+concept-art meshes in the next milestone.
+
+### Instrumentation evidence — not a baseline
+
+A bounded **debug** startup run on this software-rasterizer host was used only
+to confirm the lines exist and have the documented shape. It was launched from
+an empty temporary working directory so it could not write into the checkout:
+
+```powershell
+$env:BEVY_CONCEPT_WORLD_ASSET_ROOT = '<repo>\assets'
+$env:HUMANOID_WALK_CAPTURE_SECONDS = '12'
+<repo>\target\debug\bevy-concept-world.exe
+```
+
+It reached `Running`, emitted the baseline line, logged frame time every five
+seconds, and verified its own capture before requesting exit. **The values below
+are software-rasterizer readings and are explicitly not adopted as the
+baseline.**
+
+```
+INFO bevy_concept_world::perf: performance baseline: startup_to_running=0.125s entities=468 meshes=10 standard_materials=6 images=11 decoded_image_bytes=3850248 (3.67 MiB) images_without_cpu_data=5
+INFO bevy_diagnostic: fps       :   15.618996   (avg 36.942580)
+INFO bevy_diagnostic: frame_time:   64.024600ms (avg 34.483408ms)
+...
+INFO bevy_diagnostic: fps       :    7.231599   (avg 18.465167)
+INFO bevy_diagnostic: frame_time:  138.282000ms (avg 67.718719ms)
+```
+
+The drift from a 34 ms average to a 68 ms average inside ninety seconds is
+itself why this adapter cannot supply a steady-state figure.
+
+The real measurements are taken in the same GPU-host session that closes the
+visual gate, and recorded here. They are a baseline for future comparison, not
+pass/fail targets, so nothing in this milestone is blocked on their values —
+only on their being real.
 
 ## Captured evidence
 
 [`humanoid-overlay-software-renderer.png`](humanoid-overlay-software-renderer.png)
 is a real `Screenshot::primary_window()` capture from the release binary. It
-shows the diagnostic overlay reporting:
+shows the diagnostic overlay reporting, in this order and with this content
+(transcribed by eye from the image — the line breaks are real, but the exact
+run of spaces between `Scene: Scene` and `Clip: Walk_Loop` and the leading
+indent of the clip line are reproduced approximately, not byte for byte):
 
 ```
 State: Running
@@ -294,17 +367,27 @@ The 3D inspection scene cannot be rendered on this host:
 - The UI pass renders, so the window, swapchain, screenshot path, and render
   graph all work.
 - The PBR pass produces nothing. No pipeline or shader error is logged.
-- Shutdown after a successful capture took roughly eight minutes of wall clock
-  on the software adapter, all of it inside wgpu's teardown after the
-  application had already written and verified its screenshot and requested
-  exit. Earlier, longer runs on this host also reproduced
+- Shutdown after a **successful** capture — one that wrote and verified a
+  non-empty PNG and then requested exit — took roughly **8 to 10 minutes** of
+  wall clock across release runs on the software adapter, all of it inside
+  wgpu's teardown after the application's own work was finished. That is
+  separate from the earlier, longer runs on this host that never produced a
+  verified capture at all: those aborted inside wgpu or reported
   `We timed out while waiting on the last successful submission to complete!`
-  from `wgpu-core`'s queue wait. Both originate in the software adapter, not in
-  application code.
+  from `wgpu-core`'s queue wait. Both behaviours originate in the software
+  adapter, not in application code, but only the first is a teardown cost
+  after success. A debug-profile run made while adding the performance
+  diagnostics also wrote and verified its screenshot normally and then sat in
+  the same teardown for longer than that range, and was terminated rather than
+  waited out; the cost tracks the adapter, not the build profile's application
+  code.
 
 ## Remaining work to close the visual gate
 
-This is the **only** gate left. Run the exact commands below on a machine with a
+Two gates are left: this one, and the *values* of the performance baseline (its
+instrumentation is done — see
+[Performance baseline](#performance-baseline--instrumented-not-measured-here)).
+Both close in the same session. Run the exact commands below on a machine with a
 GPU-accelerated desktop session, from the repository root, then confirm each
 acceptance criterion by eye.
 
@@ -324,8 +407,8 @@ Controls:
 | `P` | Write `docs/validation/humanoid-walk.png` from the fixed inspection camera |
 | `Esc` | Exit — `0` from `Running`, nonzero from `Failed` |
 
-Wait until the overlay in the top-left reads exactly this, which is the state
-the software-renderer host already reaches:
+Wait until the overlay in the top-left reads as follows. Compare the content of
+each line, not its exact spacing:
 
 ```
 State: Running
@@ -337,25 +420,52 @@ Space: pause/resume   P: screenshot   Esc: exit
 ```
 
 `1 (1 with an animation graph)` and `playing` are both required; `1 (0 with an
-animation graph)` means a player was found but never wired up.
+animation graph)` means a player was found but never wired up. This is the same
+state the software-renderer host already reaches.
 
 Then press `P`. The screenshot path is relative to the working directory, so a
 run started from the repository root writes
 **`docs/validation/humanoid-walk.png`** inside the checkout. Commit that image
 and record the outcome in this file.
 
-The image, and the live window it was taken from, must show:
+### What the PNG can prove, and what it cannot
+
+A still frame is evidence for the **static** criteria only. Record these from
+the committed image:
 
 1. the humanoid upright and roughly 1.83 m against the one-meter yellow marker;
 2. the humanoid facing along the cyan `-Z` forward marker, confirming the
    recorded `yaw_degrees: 180.0`;
-3. alternating feet and a body that advances through walk poses;
-4. no collapsed, detached, or exploded limbs;
-5. a loop with no visible teleport at the seam;
-6. the character root stationary, because this clip is in-place;
-7. `Space` pausing and resuming without reloading the asset — the overlay
-   switches between `playing` and `paused` and the pose freezes in place.
+3. no collapsed, detached, or exploded limbs;
+4. a plausible mid-walk pose with the feet in different positions.
 
-While that session is open, also record the deferred performance baseline
-described above: release startup time to `Running`, steady-state frame time,
-entity count, mesh and material count, and decoded texture bytes.
+The remaining criteria are statements about **change over time**, and no single
+PNG can establish any of them. They must be confirmed by **watching the live
+window**, and the observation written down here in words — the image is not
+evidence for them:
+
+5. **Gait advancement:** the body really moves through successive walk poses and
+   the feet alternate, rather than holding one pose. A frozen character also
+   produces a plausible-looking still.
+6. **Loop seam:** watching several consecutive loops shows no visible teleport
+   or hitch at the wrap point. A single frame cannot be at the seam and away
+   from it at once.
+7. **Root stationary:** the character root stays at the origin across whole
+   loops, because this clip is in-place. One frame cannot distinguish "at the
+   origin" from "passing through the origin".
+8. **Pause and resume:** pressing `Space` freezes the pose and flips the overlay
+   to `paused`, and pressing it again resumes from that pose without reloading
+   the asset. This is a control behaviour, not an appearance.
+
+Record criteria 5–8 as an explicit observation ("watched N loops; feet
+alternate; no seam hitch; `Space` froze and resumed"), not as an inference from
+the screenshot.
+
+### Also record the performance baseline
+
+While that session is open, take the performance baseline. Nothing has to be
+instrumented: run the binary in each profile and read its own log, exactly as
+described in the README under
+[*Performance baseline*](../../README.md#performance-baseline). Copy the
+`performance baseline:` line for the debug run and for the release run, and a
+`frame_time` line from well after startup in the release run, into this file.

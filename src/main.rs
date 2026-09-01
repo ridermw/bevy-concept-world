@@ -23,6 +23,7 @@ use bevy_concept_world::{
     config::load_character_config,
     diagnostics::{DiagnosticsPlugin, capture_seconds_from_env},
     inspection::InspectionPlugin,
+    perf::PerformancePlugin,
     resolve_asset_root,
     state::{FailureReport, PrototypeState},
 };
@@ -73,7 +74,12 @@ fn main() -> AppExit {
                 ..default()
             }),
     )
-    .add_plugins((InspectionPlugin, CharacterPlugin, diagnostics))
+    .add_plugins((
+        InspectionPlugin,
+        CharacterPlugin,
+        diagnostics,
+        PerformancePlugin,
+    ))
     .init_resource::<FailureReport>();
 
     let failure = match (&capture, &asset_root, config) {
